@@ -487,7 +487,7 @@ read_leb(const uint8 *buf, uint32 *p_offset, uint32 maxbits, bool sign)
         ctype cval;                                     \
         read_leb_##ctype(frame_ip, frame_ip_end, cval); \
         PUSH_##src_op_type(cval);                       \
-        printf("i32.const %d %d %ld",cval,*frame_sp,((uint8*)frame_sp)-exec_env->wasm_stack.s.bottom); \
+        printf("i32.const %d %d %ld\n",cval,*frame_sp,((uint8*)frame_sp)-exec_env->wasm_stack.s.bottom); \
     } while (0)
 
 #define DEF_OP_EQZ(src_op_type)             \
@@ -1108,7 +1108,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
            fprintf(file,"val %d ",val);                     \
            fprintf(file,"depth %d \n",depth);                     \
     } while (0)
-#define SNAPSHOT_STEP 2000
+#define SNAPSHOT_STEP 4000
 #define SNAPSHOT_DEBUG_STEP 0
 
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_DEBUG_INTERP != 0
