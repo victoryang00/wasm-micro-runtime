@@ -20,9 +20,9 @@
 #if WASM_ENABLE_FAST_JIT != 0
 #include "../fast-jit/jit_compiler.h"
 #endif
-
-extern void _Z17serialize_to_fileP11WASMExecEnv(WASMExecEnv* instance);
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../include/wamr_export.h"
+#endif
 int counter_ = 0;
 typedef int32 CellType_I32;
 typedef int64 CellType_I64;
@@ -1121,6 +1121,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
         goto *handle_table[*frame_ip++];                                  \
     } while (0)
 #else
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 #define HANDLE_OP_END()                                                  \
     do {                                                                 \
        SYNC_ALL_TO_FRAME();                                              \
@@ -1134,7 +1135,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
                 counter_++;                                              \
                 SERIALIZE_CURSTATE(file1);                               \
                 if(counter_>SNAPSHOT_STEP+SNAPSHOT_DEBUG_STEP) {         \
-                    _Z17serialize_to_fileP11WASMExecEnv(exec_env);       \
+                    serialize_to_file(exec_env);                         \
                 }                                                        \
              FETCH_OPCODE_AND_DISPATCH();                                \
              }                                                           \
@@ -1146,6 +1147,9 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
                 FETCH_OPCODE_AND_DISPATCH();                             \
         }                                                                \
     } while (0)
+#else
+#define HANDLE_OP_END() FETCH_OPCODE_AND_DISPATCH();
+#endif
 #endif
 
 #else /* else of WASM_ENABLE_LABELS_AS_VALUES */
@@ -1218,22 +1222,14 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 local_type, *global_addr;
     uint32 cache_index, type_index, param_cell_num, cell_num;
     uint8 value_type;
-    FILE* file1;
-    FILE *file2;
-    if (exec_env->is_restore){
-        // WASMFunction *cur_wasm_func = cur_func->u.func;
-        // file2=fopen("trace-compare1.txt","w");
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (exec_env->is_restore) {
         frame = exec_env->cur_frame;
         UPDATE_ALL_FROM_FRAME();
         frame_ip_end = wasm_get_func_code_end(cur_func);
         frame_lp = frame->lp;
-    }else{
-//        if(SNAPSHOT_DEBUG_STEP!=0)
-//            file1=fopen("trace-origin.txt","w");
-//        else
-//            file1=fopen("trace-orgin.txt","w");
-
     }
+#endif
 #if WASM_ENABLE_DEBUG_INTERP != 0
     uint8 *frame_ip_orig = NULL;
     WASMDebugInstance *debug_instance = wasm_exec_env_get_instance(exec_env);

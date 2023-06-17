@@ -20,7 +20,9 @@
 #include "refcount.h"
 #include "rights.h"
 #include "str.h"
-extern void _Z9insert_fdiPKci(int fd, const char *path, int flags);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../include/wamr_export.h"
+#endif
 #if 0 /* TODO: -std=gnu99 causes compile error, comment them first */
 // struct iovec must have the same layout as __wasi_iovec_t.
 static_assert(offsetof(struct iovec, iov_base) ==
@@ -1757,7 +1759,9 @@ success:
     pa->fd = fds[curfd];
     pa->follow = false;
     pa->fd_object = fo;
-    _Z9insert_fdiPKci(pa->fd, path, 0); // get path
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    insert_fd(pa->fd, path, 0); // get path
+#endif
     return 0;
 
 fail:
@@ -1980,7 +1984,9 @@ wasmtime_ssp_path_open(
         noflags |= O_NOFOLLOW;
 
     int nfd = openat(pa.fd, pa.path, noflags, 0666);
-    _Z9insert_fdiPKci(nfd, path, noflags);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    insert_fd(nfd, path, noflags);
+#endif
     if (nfd < 0) {
         int openat_errno = errno;
         // Linux returns ENXIO instead of EOPNOTSUPP when opening a socket.

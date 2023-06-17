@@ -100,6 +100,11 @@ if (NOT DEFINED WAMR_BUILD_SIMD)
   set (WAMR_BUILD_SIMD 1)
 endif ()
 
+if (NOT DEFINED WAMR_BUILD_CHECKPOINT_RESTORE)
+  # Enable SIMD by default
+  set (WAMR_BUILD_CHECKPOINT_RESTORE 1)
+endif ()
+
 if (NOT DEFINED WAMR_BUILD_REF_TYPES)
   # Disable reference types by default
   set (WAMR_BUILD_REF_TYPES 0)
