@@ -2383,7 +2383,7 @@ wasm_get_exception(WASMModuleInstance *module_inst)
 bool
 wasm_copy_exception(WASMModuleInstance *module_inst, char *exception_buf)
 {
-    bool has_exception = true;
+    bool has_exception = false;
 
 #if WASM_ENABLE_SHARED_MEMORY != 0
     WASMSharedMemNode *node =
@@ -2400,7 +2400,7 @@ wasm_copy_exception(WASMModuleInstance *module_inst, char *exception_buf)
             bh_memcpy_s(exception_buf, sizeof(module_inst->cur_exception),
                         module_inst->cur_exception,
                         sizeof(module_inst->cur_exception));
-        has_exception = false;
+        has_exception = true;
     }
 #if WASM_ENABLE_SHARED_MEMORY != 0
     if (node)

@@ -485,7 +485,7 @@ aot_compile_op_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     block->wasm_code_else = else_addr;
     block->wasm_code_end = end_addr;
     block->block_index = func_ctx->block_stack.block_index[label_type];
-      func_ctx->block_stack.block_index[label_type]++;
+    func_ctx->block_stack.block_index[label_type]++;
 
     if (comp_ctx->aot_frame) {
         if (label_type != LABEL_TYPE_BLOCK
