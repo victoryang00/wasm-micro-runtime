@@ -35,7 +35,8 @@ typedef float64 CellType_F64;
 #define CHECK_MEMORY_OVERFLOW(bytes)                             \
     do {                                                         \
         uint64 offset1 = (uint64)offset + (uint64)addr;          \
-        if (offset1 + bytes <= (uint64)get_linear_mem_size())    \
+        if (disable_bounds_checks                                \
+            || offset1 + bytes <= (uint64)get_linear_mem_size()) \
             /* If offset1 is in valid range, maddr must also     \
                 be in valid range, no need to check it again. */ \
             maddr = memory->memory_data + offset1;               \
@@ -43,15 +44,15 @@ typedef float64 CellType_F64;
             goto out_of_bounds;                                  \
     } while (0)
 
-#define CHECK_BULK_MEMORY_OVERFLOW(start, bytes, maddr) \
-    do {                                                \
-        uint64 offset1 = (uint32)(start);               \
-        if (offset1 + bytes <= get_linear_mem_size())   \
-            /* App heap space is not valid space for    \
-               bulk memory operation */                 \
-            maddr = memory->memory_data + offset1;      \
-        else                                            \
-            goto out_of_bounds;                         \
+#define CHECK_BULK_MEMORY_OVERFLOW(start, bytes, maddr)                        \
+    do {                                                                       \
+        uint64 offset1 = (uint32)(start);                                      \
+        if (disable_bounds_checks || offset1 + bytes <= get_linear_mem_size()) \
+            /* App heap space is not valid space for                           \
+               bulk memory operation */                                        \
+            maddr = memory->memory_data + offset1;                             \
+        else                                                                   \
+            goto out_of_bounds;                                                \
     } while (0)
 #else
 #define CHECK_MEMORY_OVERFLOW(bytes)                    \
@@ -232,7 +233,7 @@ local_copysignf(float x, float y)
 {
     union {
         float f;
-        uint32_t i;
+        uint32 i;
     } ux = { x }, uy = { y };
     ux.i &= 0x7fffffff;
     ux.i |= uy.i & 0x80000000;
@@ -244,9 +245,9 @@ local_copysign(double x, double y)
 {
     union {
         double f;
-        uint64_t i;
+        uint64 i;
     } ux = { x }, uy = { y };
-    ux.i &= -1ULL / 2;
+    ux.i &= UINT64_MAX / 2;
     ux.i |= uy.i & 1ULL << 63;
     return ux.f;
 }
@@ -990,7 +991,7 @@ wasm_interp_call_func_native(WASMModuleInstance *module_inst,
 }
 
 #if WASM_ENABLE_MULTI_MODULE != 0
-void
+static void
 wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                                WASMExecEnv *exec_env,
                                WASMFunctionInstance *cur_func,
@@ -1160,7 +1161,7 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
 #endif
 }
 
-void
+static void
 wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                                WASMExecEnv *exec_env,
                                WASMFunctionInstance *cur_func,
@@ -1199,6 +1200,15 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 *maddr = NULL;
     uint32 local_idx, local_offset, global_idx;
     uint8 opcode, local_type, *global_addr;
+#if !defined(OS_ENABLE_HW_BOUND_CHECK) \
+    || WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
+#if WASM_CONFIGUABLE_BOUNDS_CHECKS != 0
+    bool disable_bounds_checks = !wasm_runtime_is_bounds_checks_enabled(
+        (WASMModuleInstanceCommon *)module);
+#else
+    bool disable_bounds_checks = false;
+#endif
+#endif
 
 #if WASM_ENABLE_LABELS_AS_VALUES != 0
 #define HANDLE_OPCODE(op) &&HANDLE_##op
@@ -3978,6 +3988,15 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
         word_copy(outs_area->operand + function->const_cell_num, argv, argc);
 
     wasm_exec_env_set_cur_frame(exec_env, frame);
+
+#if defined(os_writegsbase)
+    {
+        WASMMemoryInstance *memory_inst = wasm_get_default_memory(module_inst);
+        if (memory_inst)
+            /* write base addr of linear memory to GS segment register */
+            os_writegsbase(memory_inst->memory_data);
+    }
+#endif
 
     if (function->is_import_func) {
 #if WASM_ENABLE_MULTI_MODULE != 0

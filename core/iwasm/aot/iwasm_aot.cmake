@@ -36,5 +36,9 @@ if (WAMR_BUILD_DEBUG_AOT EQUAL 1)
   file(GLOB debug_source ${IWASM_AOT_DIR}/debug/*.c)
 endif()
 
+if (WAMR_BUILD_AOT_STACK_FRAME EQUAL 1)
+  add_definitions(-DWASM_ENABLE_AOT_STACK_FRAME=1)
+endif()
+
 set (IWASM_AOT_SOURCE ${c_source_all} ${arch_source} ${debug_source})
 

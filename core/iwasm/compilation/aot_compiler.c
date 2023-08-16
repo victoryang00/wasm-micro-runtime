@@ -1,4 +1,4 @@
-/*
+  /*
  * Copyright (C) 2019 Intel Corporation. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
@@ -161,6 +161,391 @@ aot_validate_wasm(AOTCompContext *comp_ctx)
         goto build_atomic_rmw;
 
 static bool
+store_value(AOTCompContext *comp_ctx, LLVMValueRef value, uint8 value_type,
+            LLVMValueRef cur_frame, uint32 offset)
+{
+    LLVMValueRef value_offset, value_addr, value_ptr = NULL, res;
+    LLVMTypeRef value_ptr_type;
+
+    if (!(value_offset = I32_CONST(offset))) {
+        aot_set_last_error("llvm build const failed");
+        return false;
+    }
+
+    if (!(value_addr =
+              LLVMBuildInBoundsGEP2(comp_ctx->builder, INT8_TYPE, cur_frame,
+                                    &value_offset, 1, "value_addr"))) {
+        aot_set_last_error("llvm build in bounds gep failed");
+        return false;
+    }
+
+    switch (value_type) {
+        case VALUE_TYPE_I32:
+            value_ptr_type = INT32_PTR_TYPE;
+            break;
+        case VALUE_TYPE_I64:
+            value_ptr_type = INT64_PTR_TYPE;
+            break;
+        case VALUE_TYPE_F32:
+            value_ptr_type = F32_PTR_TYPE;
+            break;
+        case VALUE_TYPE_F64:
+            value_ptr_type = F64_PTR_TYPE;
+            break;
+        case VALUE_TYPE_V128:
+            value_ptr_type = V128_PTR_TYPE;
+            break;
+        default:
+            bh_assert(0);
+            break;
+    }
+
+    if (!(value_ptr = LLVMBuildBitCast(comp_ctx->builder, value_addr,
+                                       value_ptr_type, "value_ptr"))) {
+        aot_set_last_error("llvm build bit cast failed");
+        return false;
+    }
+
+    if (!(res = LLVMBuildStore(comp_ctx->builder, value, value_ptr))) {
+        aot_set_last_error("llvm build store failed");
+        return false;
+    }
+
+    LLVMSetAlignment(res, 1);
+
+    return true;
+}
+
+bool
+aot_gen_commit_values(AOTCompFrame *frame)
+{
+    AOTCompContext *comp_ctx = frame->comp_ctx;
+    AOTFuncContext *func_ctx = frame->func_ctx;
+    AOTValueSlot *p;
+    LLVMValueRef value;
+    uint32 n;
+
+    for (p = frame->lp; p < frame->sp; p++) {
+        if (!p->dirty)
+            continue;
+
+        p->dirty = 0;
+        n = p - frame->lp;
+
+        switch (p->type) {
+            case VALUE_TYPE_I32:
+            case VALUE_TYPE_FUNCREF:
+            case VALUE_TYPE_EXTERNREF:
+                if (!store_value(comp_ctx, p->value, VALUE_TYPE_I32,
+                                 func_ctx->cur_frame,
+                                 offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_I64:
+                (++p)->dirty = 0;
+                if (!store_value(comp_ctx, p->value, VALUE_TYPE_I64,
+                                 func_ctx->cur_frame,
+                                 offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_F32:
+                if (!store_value(comp_ctx, p->value, VALUE_TYPE_F32,
+                                 func_ctx->cur_frame,
+                                 offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_F64:
+                (++p)->dirty = 0;
+                if (!store_value(comp_ctx, p->value, VALUE_TYPE_F64,
+                                 func_ctx->cur_frame,
+                                 offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_V128:
+                (++p)->dirty = 0;
+                (++p)->dirty = 0;
+                (++p)->dirty = 0;
+                if (!store_value(comp_ctx, p->value, VALUE_TYPE_V128,
+                                 func_ctx->cur_frame,
+                                 offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_I1:
+                if (!(value = LLVMBuildZExt(comp_ctx->builder, p->value,
+                                            I32_TYPE, "i32_val"))) {
+                    aot_set_last_error("llvm build bit cast failed");
+                    return false;
+                }
+                if (!store_value(comp_ctx, value, VALUE_TYPE_I32,
+                                 func_ctx->cur_frame,
+                                 offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            default:
+                bh_assert(0);
+                break;
+        }
+    }
+
+    return true;
+}
+
+bool
+aot_gen_commit_sp_ip(AOTCompFrame *frame, AOTValueSlot *sp, uint8 *ip)
+{
+    AOTCompContext *comp_ctx = frame->comp_ctx;
+    AOTFuncContext *func_ctx = frame->func_ctx;
+    LLVMValueRef cur_frame = func_ctx->cur_frame;
+    LLVMValueRef value_offset, value_addr, value_ptr, value;
+    LLVMTypeRef int8_ptr_ptr_type;
+    uint32 offset_ip, offset_sp, n;
+    bool is_64bit = (comp_ctx->pointer_size == sizeof(uint64)) ? true : false;
+
+    if (!comp_ctx->is_jit_mode) {
+        offset_ip = (uint32)sizeof(uintptr_t) * 4;
+        offset_sp = (uint32)sizeof(uintptr_t) * 5;
+    }
+    else {
+        offset_ip = offsetof(WASMInterpFrame, ip);
+        offset_sp = offsetof(WASMInterpFrame, sp);
+    }
+
+    /* commit ip */
+
+    if (!(value_offset = I32_CONST(offset_ip))) {
+        aot_set_last_error("llvm build const failed");
+        return false;
+    }
+
+    if (!(value_addr =
+              LLVMBuildInBoundsGEP2(comp_ctx->builder, INT8_TYPE, cur_frame,
+                                    &value_offset, 1, "ip_addr"))) {
+        aot_set_last_error("llvm build in bounds gep failed");
+        return false;
+    }
+
+    if (!(value_ptr = LLVMBuildBitCast(
+              comp_ctx->builder, value_addr,
+              is_64bit ? INT64_PTR_TYPE : INT32_PTR_TYPE, "ip_ptr"))) {
+        aot_set_last_error("llvm build bit cast failed");
+        return false;
+    }
+
+    if (!comp_ctx->is_jit_mode) {
+        if (is_64bit)
+            value =
+                I64_CONST((uint64)(uintptr_t)(ip - func_ctx->aot_func->code));
+        else
+            value =
+                I32_CONST((uint32)(uintptr_t)(ip - func_ctx->aot_func->code));
+    }
+    else {
+        if (is_64bit)
+            value = I64_CONST((uint64)(uintptr_t)ip);
+        else
+            value = I32_CONST((uint32)(uintptr_t)ip);
+    }
+
+    if (!value) {
+        aot_set_last_error("llvm build const failed");
+        return false;
+    }
+
+    if (!LLVMBuildStore(comp_ctx->builder, value, value_ptr)) {
+        aot_set_last_error("llvm build store failed");
+        return false;
+    }
+
+    /* commit sp */
+
+    n = sp - frame->lp;
+    value = I32_CONST(offset_of_local(comp_ctx, n));
+    if (!value) {
+        aot_set_last_error("llvm build const failed");
+        return false;
+    }
+
+    if (!(value = LLVMBuildInBoundsGEP2(comp_ctx->builder, INT8_TYPE, cur_frame,
+                                        &value, 1, "sp"))) {
+        aot_set_last_error("llvm build in bounds gep failed");
+        return false;
+    }
+
+    if (!(value_offset = I32_CONST(offset_sp))) {
+        aot_set_last_error("llvm build const failed");
+        return false;
+    }
+
+    if (!(value_addr =
+              LLVMBuildInBoundsGEP2(comp_ctx->builder, INT8_TYPE, cur_frame,
+                                    &value_offset, 1, "sp_addr"))) {
+        aot_set_last_error("llvm build in bounds gep failed");
+        return false;
+    }
+
+    if (!(int8_ptr_ptr_type = LLVMPointerType(INT8_PTR_TYPE, 0))) {
+        aot_set_last_error("llvm build pointer type failed");
+        return false;
+    }
+
+    if (!(value_ptr = LLVMBuildBitCast(comp_ctx->builder, value_addr,
+                                       int8_ptr_ptr_type, "sp_ptr"))) {
+        aot_set_last_error("llvm build bit cast failed");
+        return false;
+    }
+
+    if (!LLVMBuildStore(comp_ctx->builder, value, value_ptr)) {
+        aot_set_last_error("llvm build store failed");
+        return false;
+    }
+
+    /* commit sp */
+    return true;
+}
+
+bool
+aot_gen_commit_ref_flags(AOTCompFrame *frame)
+{
+    /* TODO */
+    return true;
+}
+
+static bool
+init_comp_frame(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
+                uint32 func_idx)
+{
+    AOTCompFrame *aot_frame;
+    WASMModule *wasm_module = comp_ctx->comp_data->wasm_module;
+    AOTFunc *aot_func = func_ctx->aot_func;
+    AOTFuncType *func_type = aot_func->func_type;
+    AOTBlock *block = func_ctx->block_stack.block_list_end;
+    LLVMValueRef local_value;
+    uint32 max_local_cell_num =
+        aot_func->param_cell_num + aot_func->local_cell_num;
+    uint32 max_stack_cell_num = aot_func->max_stack_cell_num;
+    uint32 all_cell_num = max_local_cell_num + max_stack_cell_num;
+    uint32 i, n;
+    uint64 total_size;
+    uint8 local_type;
+
+    /* Free aot_frame if it was allocated previously for
+       compiling other functions */
+    if (comp_ctx->aot_frame) {
+        wasm_runtime_free(comp_ctx->aot_frame);
+        comp_ctx->aot_frame = NULL;
+    }
+
+    /* Allocate extra 2 cells since some operations may push more
+       operands than the number calculated in wasm loader, such as
+       PUSH_F64(F64_CONST(1.0)) in aot_compile_op_f64_promote_f32 */
+    all_cell_num += 2;
+    total_size = offsetof(AOTCompFrame, lp)
+                 + (uint64)sizeof(AOTValueSlot) * all_cell_num;
+
+    if (total_size > UINT32_MAX
+        || !(comp_ctx->aot_frame = aot_frame =
+                 wasm_runtime_malloc((uint32)total_size))) {
+        aot_set_last_error("allocate memory failed.");
+        return false;
+    }
+    memset(aot_frame, 0, (uint32)total_size);
+
+    aot_frame->cur_wasm_module = wasm_module;
+    aot_frame->cur_wasm_func = wasm_module->functions[func_idx];
+    aot_frame->cur_wasm_func_idx =
+        func_idx + wasm_module->import_function_count;
+    aot_frame->comp_ctx = comp_ctx;
+    aot_frame->func_ctx = func_ctx;
+
+    aot_frame->max_local_cell_num = max_local_cell_num;
+    aot_frame->max_stack_cell_num = max_stack_cell_num;
+
+    aot_frame->sp = aot_frame->lp + max_local_cell_num;
+
+    /* Init the frame_sp_begin of the function block */
+    block->frame_sp_begin = aot_frame->sp;
+
+    n = 0;
+
+    /* Set all params dirty since they were set to llvm value but
+       haven't been committed to the AOT/JIT stack frame */
+    for (i = 0; i < func_type->param_count; i++) {
+        local_type = func_type->types[i];
+        local_value = LLVMGetParam(func_ctx->func, i + 1);
+
+        switch (local_type) {
+            case VALUE_TYPE_I32:
+                set_local_i32(comp_ctx->aot_frame, n, local_value);
+                n++;
+                break;
+            case VALUE_TYPE_I64:
+                set_local_i64(comp_ctx->aot_frame, n, local_value);
+                n += 2;
+                break;
+            case VALUE_TYPE_F32:
+                set_local_f32(comp_ctx->aot_frame, n, local_value);
+                n++;
+                break;
+            case VALUE_TYPE_F64:
+                set_local_f64(comp_ctx->aot_frame, n, local_value);
+                n += 2;
+                break;
+            case VALUE_TYPE_V128:
+                set_local_v128(comp_ctx->aot_frame, n, local_value);
+                n += 4;
+                break;
+            case VALUE_TYPE_FUNCREF:
+            case VALUE_TYPE_EXTERNREF:
+                set_local_ref(comp_ctx->aot_frame, n, local_value, local_type);
+                n++;
+                break;
+            default:
+                bh_assert(0);
+                break;
+        }
+    }
+
+    /* Set all locals dirty since they were set to llvm value but
+       haven't been committed to the AOT/JIT stack frame */
+    for (i = 0; i < aot_func->local_count; i++) {
+        local_type = aot_func->local_types[i];
+
+        switch (local_type) {
+            case VALUE_TYPE_I32:
+                set_local_i32(comp_ctx->aot_frame, n, I32_ZERO);
+                n++;
+                break;
+            case VALUE_TYPE_I64:
+                set_local_i64(comp_ctx->aot_frame, n, I64_ZERO);
+                n += 2;
+                break;
+            case VALUE_TYPE_F32:
+                set_local_f32(comp_ctx->aot_frame, n, F32_ZERO);
+                n++;
+                break;
+            case VALUE_TYPE_F64:
+                set_local_f64(comp_ctx->aot_frame, n, F64_ZERO);
+                n += 2;
+                break;
+            case VALUE_TYPE_V128:
+                set_local_v128(comp_ctx->aot_frame, n, V128_f64x2_ZERO);
+                n += 4;
+                break;
+            case VALUE_TYPE_FUNCREF:
+            case VALUE_TYPE_EXTERNREF:
+                set_local_ref(comp_ctx->aot_frame, n, I32_ZERO, local_type);
+                n++;
+                break;
+            default:
+                bh_assert(0);
+                break;
+        }
+    }
+
+    return true;
+}
+
+static bool
 aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 {
     AOTFuncContext *func_ctx = comp_ctx->func_ctxes[func_index];
@@ -184,6 +569,12 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 #if WASM_ENABLE_DEBUG_AOT != 0
     LLVMMetadataRef location;
 #endif
+
+    if (comp_ctx->enable_aux_stack_frame) {
+        if (!init_comp_frame(comp_ctx, func_ctx, func_index)) {
+            return false;
+        }
+    }
 
     /* Start to translate the opcodes */
     LLVMPositionBuilderAtEnd(
@@ -240,6 +631,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     result_count = func_type->result_count;
                     result_types = func_type->types + param_count;
                 }
+                // generate the stable mapping to the register
                 if (!aot_compile_op_block(
                         comp_ctx, func_ctx, &frame_ip, frame_ip_end,
                         (uint32)(LABEL_TYPE_BLOCK + opcode - WASM_OP_BLOCK),
@@ -2617,64 +3009,6 @@ verify_module(AOTCompContext *comp_ctx)
     return true;
 }
 
-/* Check whether the target supports hardware atomic instructions */
-static bool
-aot_require_lower_atomic_pass(AOTCompContext *comp_ctx)
-{
-    bool ret = false;
-    if (!strncmp(comp_ctx->target_arch, "riscv", 5)) {
-        char *feature =
-            LLVMGetTargetMachineFeatureString(comp_ctx->target_machine);
-
-        if (feature) {
-            if (!strstr(feature, "+a")) {
-                ret = true;
-            }
-            LLVMDisposeMessage(feature);
-        }
-    }
-    return ret;
-}
-
-/* Check whether the target needs to expand switch to if/else */
-static bool
-aot_require_lower_switch_pass(AOTCompContext *comp_ctx)
-{
-    bool ret = false;
-
-    /* IR switch/case will cause .rodata relocation on riscv/xtensa */
-    if (!strncmp(comp_ctx->target_arch, "riscv", 5)
-        || !strncmp(comp_ctx->target_arch, "xtensa", 6)) {
-        ret = true;
-    }
-
-    return ret;
-}
-
-static bool
-apply_passes_for_indirect_mode(AOTCompContext *comp_ctx)
-{
-    LLVMPassManagerRef common_pass_mgr;
-
-    if (!(common_pass_mgr = LLVMCreatePassManager())) {
-        aot_set_last_error("create pass manager failed");
-        return false;
-    }
-
-    aot_add_expand_memory_op_pass(common_pass_mgr);
-
-    if (aot_require_lower_atomic_pass(comp_ctx))
-        LLVMAddLowerAtomicPass(common_pass_mgr);
-
-    if (aot_require_lower_switch_pass(comp_ctx))
-        LLVMAddLowerSwitchPass(common_pass_mgr);
-
-    LLVMRunPassManager(common_pass_mgr, comp_ctx->module);
-
-    LLVMDisposePassManager(common_pass_mgr);
-    return true;
-}
-
 bool
 aot_compile_wasm(AOTCompContext *comp_ctx)
 {
@@ -2714,17 +3048,6 @@ aot_compile_wasm(AOTCompContext *comp_ctx)
            possible core dump. */
         bh_print_time("Begin to run llvm optimization passes");
         aot_apply_llvm_new_pass_manager(comp_ctx, comp_ctx->module);
-
-        /* Run specific passes for AOT indirect mode in last since general
-           optimization may create some intrinsic function calls like
-           llvm.memset, so let's remove these function calls here. */
-        if (!comp_ctx->is_jit_mode && comp_ctx->is_indirect_mode) {
-            bh_print_time("Begin to run optimization passes "
-                          "for indirect mode");
-            if (!apply_passes_for_indirect_mode(comp_ctx)) {
-                return false;
-            }
-        }
         bh_print_time("Finish llvm optimization passes");
     }
 
@@ -2760,6 +3083,16 @@ aot_compile_wasm(AOTCompContext *comp_ctx)
             LLVMOrcDisposeThreadSafeModule(orc_thread_safe_module);
             aot_handle_llvm_errmsg("failed to addIRModule", err);
             return false;
+        }
+
+        if (comp_ctx->stack_sizes != NULL) {
+            LLVMOrcJITTargetAddress addr;
+            if ((err = LLVMOrcLLLazyJITLookup(comp_ctx->orc_jit, &addr,
+                                              aot_stack_sizes_name))) {
+                aot_handle_llvm_errmsg("failed to look up stack_sizes", err);
+                return false;
+            }
+            comp_ctx->jit_stack_sizes = (uint32 *)addr;
         }
     }
 
@@ -2815,6 +3148,55 @@ aot_emit_llvm_file(AOTCompContext *comp_ctx, const char *file_name)
     return true;
 }
 
+static bool
+aot_move_file(const char *dest, const char *src)
+{
+    FILE *dfp = fopen(dest, "w");
+    FILE *sfp = fopen(src, "r");
+    size_t rsz;
+    char buf[128];
+    bool success = false;
+
+    if (dfp == NULL || sfp == NULL) {
+        LOG_DEBUG("open error %s %s", dest, src);
+        goto fail;
+    }
+    do {
+        rsz = fread(buf, 1, sizeof(buf), sfp);
+        if (rsz > 0) {
+            size_t wsz = fwrite(buf, 1, rsz, dfp);
+            if (wsz < rsz) {
+                LOG_DEBUG("write error");
+                goto fail;
+            }
+        }
+        if (rsz < sizeof(buf)) {
+            if (ferror(sfp)) {
+                LOG_DEBUG("read error");
+                goto fail;
+            }
+        }
+    } while (rsz > 0);
+    success = true;
+fail:
+    if (dfp != NULL) {
+        if (fclose(dfp)) {
+            LOG_DEBUG("close error");
+            success = false;
+        }
+        if (!success) {
+            (void)unlink(dest);
+        }
+    }
+    if (sfp != NULL) {
+        (void)fclose(sfp);
+    }
+    if (success) {
+        (void)unlink(src);
+    }
+    return success;
+}
+
 bool
 aot_emit_object_file(AOTCompContext *comp_ctx, char *file_name)
 {
@@ -2830,7 +3212,25 @@ aot_emit_object_file(AOTCompContext *comp_ctx, char *file_name)
         int ret;
 
         if (comp_ctx->external_llc_compiler) {
+            const char *stack_usage_flag = "";
             char bc_file_name[64];
+            char su_file_name[65]; /* See the comment below */
+
+            if (comp_ctx->stack_usage_file != NULL) {
+                /*
+                 * Note: we know the caller uses 64 byte buffer for
+                 * file_name. It will get 1 byte longer because we
+                 * replace ".o" with ".su".
+                 */
+                size_t len = strlen(file_name);
+                bh_assert(len + 1 <= sizeof(su_file_name));
+                bh_assert(len > 3);
+                bh_assert(file_name[len - 2] == '.');
+                bh_assert(file_name[len - 1] == 'o');
+                snprintf(su_file_name, sizeof(su_file_name), "%.*s.su",
+                         (int)(len - 2), file_name);
+                stack_usage_flag = " -fstack-usage";
+            }
 
             if (!aot_generate_tempfile_name("wamrc-bc", "bc", bc_file_name,
                                             sizeof(bc_file_name))) {
@@ -2842,8 +3242,8 @@ aot_emit_object_file(AOTCompContext *comp_ctx, char *file_name)
                 return false;
             }
 
-            snprintf(cmd, sizeof(cmd), "%s %s -o %s %s",
-                     comp_ctx->external_llc_compiler,
+            snprintf(cmd, sizeof(cmd), "%s%s %s -o %s %s",
+                     comp_ctx->external_llc_compiler, stack_usage_flag,
                      comp_ctx->llc_compiler_flags ? comp_ctx->llc_compiler_flags
                                                   : "-O3 -c",
                      file_name, bc_file_name);
@@ -2857,6 +3257,22 @@ aot_emit_object_file(AOTCompContext *comp_ctx, char *file_name)
                 aot_set_last_error("failed to compile LLVM bitcode to obj file "
                                    "with external LLC compiler.");
                 return false;
+            }
+            if (comp_ctx->stack_usage_file != NULL) {
+                /*
+                 * move the temporary .su file to the specified location.
+                 *
+                 * Note: the former is automatimally inferred from the output
+                 * filename (file_name here) by clang.
+                 *
+                 * Note: the latter might be user-specified.
+                 * (wamrc --stack-usage=<file>)
+                 */
+                if (!aot_move_file(comp_ctx->stack_usage_file, su_file_name)) {
+                    aot_set_last_error("failed to move su file.");
+                    (void)unlink(su_file_name);
+                    return false;
+                }
             }
         }
         else if (comp_ctx->external_asm_compiler) {
