@@ -25,9 +25,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <stdlib.h>
-#ifndef BH_PLATFORM_WINDOWS
 #include <unistd.h>
-#endif
 #include <string.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -66,9 +64,9 @@ typedef struct JITDescriptor {
  * To prevent GCC from inlining or removing it we place noinline attribute
  * and inline assembler statement inside.
  */
-void __jit_debug_register_code();
+void __attribute__((noinline)) __jit_debug_register_code();
 
-void __jit_debug_register_code()
+void __attribute__((noinline)) __jit_debug_register_code()
 {
     int x;
     *(char *)&x = '\0';

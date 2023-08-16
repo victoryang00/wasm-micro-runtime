@@ -41,6 +41,10 @@ typedef struct AOTObjectDataSection {
     char *name;
     uint8 *data;
     uint32 size;
+#if WASM_ENABLE_WAMR_COMPILER != 0 || WASM_ENABLE_JIT != 0
+    bool is_name_allocated;
+    bool is_data_allocated;
+#endif
 } AOTObjectDataSection;
 
 /* Relocation info */
@@ -51,6 +55,9 @@ typedef struct AOTRelocation {
     char *symbol_name;
     /* index in the symbol offset field */
     uint32 symbol_index;
+#if WASM_ENABLE_WAMR_COMPILER != 0 || WASM_ENABLE_JIT != 0
+    bool is_symbol_name_allocated;
+#endif
 } AOTRelocation;
 
 /* Relocation Group */
@@ -60,6 +67,9 @@ typedef struct AOTRelocationGroup {
     uint32 name_index;
     uint32 relocation_count;
     AOTRelocation *relocations;
+#if WASM_ENABLE_WAMR_COMPILER != 0 || WASM_ENABLE_JIT != 0
+    bool is_section_name_allocated;
+#endif
 } AOTRelocationGroup;
 
 /* AOT function instance */
@@ -78,9 +88,11 @@ typedef struct AOTFunctionInstance {
 } AOTFunctionInstance;
 
 typedef struct AOTModuleInstanceExtra {
+    DefPointer(const uint32 *, stack_sizes);
     CApiFuncImport *c_api_func_imports;
-#if WASM_ENABLE_WASI_NN != 0
-    WASINNContext *wasi_nn_ctx;
+#if WASM_CONFIGUABLE_BOUNDS_CHECKS != 0
+    /* Disable bounds checks or not */
+    bool disable_bounds_checks;
 #endif
 } AOTModuleInstanceExtra;
 
@@ -106,6 +118,13 @@ typedef struct AOTUnwindInfo {
 
 /* size of mov instruction and jmp instruction */
 #define PLT_ITEM_SIZE 12
+#endif
+
+#if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
+typedef struct GOTItem {
+    uint32 func_idx;
+    struct GOTItem *next;
+} GOTItem, *GOTItemList;
 #endif
 
 typedef struct AOTModule {
@@ -163,6 +182,12 @@ typedef struct AOTModule {
     void **func_ptrs;
     /* func type indexes of AOTed (un-imported) functions */
     uint32 *func_type_indexes;
+#if WASM_ENABLE_DUMP_CALL_STACK != 0 || WASM_ENABLE_PERF_PROFILING != 0
+    /* max local cell nums of AOTed (un-imported) functions */
+    uint32 *max_local_cell_nums;
+    /* max stack cell nums of AOTed (un-imported) functions */
+    uint32 *max_stack_cell_nums;
+#endif
 
     /* export info */
     uint32 export_count;
@@ -202,6 +227,13 @@ typedef struct AOTModule {
        for AOT functions */
     RUNTIME_FUNCTION *rtl_func_table;
     bool rtl_func_table_registered;
+#endif
+
+#if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
+    uint32 got_item_count;
+    GOTItemList got_item_list;
+    GOTItemList got_item_list_end;
+    void **got_func_ptrs;
 #endif
 
     /* data sections in AOT object file, including .data, .rodata
@@ -286,13 +318,79 @@ typedef struct AOTFuncPerfProfInfo {
 
 /* AOT auxiliary call stack */
 typedef struct AOTFrame {
+    /* The frame of the caller which is calling current function */
     struct AOTFrame *prev_frame;
-    uint32 func_index;
-#if WASM_ENABLE_PERF_PROFILING != 0
-    uint64 time_started;
+
+    /* The non-imported function index of current function */
+    uintptr_t func_index;
+
+    /* Used when performance profiling is enabled */
+    uintptr_t time_started;
+
+    /* Used when performance profiling is enabled */
     AOTFuncPerfProfInfo *func_perf_prof_info;
-#endif
+
+    /* Instruction pointer: offset to the bytecode array */
+    uintptr_t ip_offset;
+
+    /* Operand stack top pointer of the current frame */
+    uint32 *sp;
+
+    /**
+     * Frame data, the layout is:
+     *  local area: parameters and local variables
+     *  stack area: wasm operand stack
+     */
+    uint32 lp[1];
 } AOTFrame;
+
+#if WASM_ENABLE_STATIC_PGO != 0
+typedef struct LLVMProfileRawHeader {
+    uint64 magic;
+    uint64 version;
+    uint64 binary_ids_size;
+    uint64 num_prof_data;
+    uint64 padding_bytes_before_counters;
+    uint64 num_prof_counters;
+    uint64 padding_bytes_after_counters;
+    uint64 names_size;
+    uint64 counters_delta;
+    uint64 names_delta;
+    uint64 value_kind_last;
+} LLVMProfileRawHeader;
+
+typedef struct ValueProfNode {
+    uint64 value;
+    uint64 count;
+    struct ValueProfNode *next;
+} ValueProfNode;
+
+/* The profiling data of data sections created by aot compiler and
+   used when profiling, the width of pointer can be 8 bytes (64-bit)
+   or 4 bytes (32-bit) */
+typedef struct LLVMProfileData {
+    uint64 func_md5;
+    uint64 func_hash;
+    uint64 offset_counters;
+    uintptr_t func_ptr;
+    ValueProfNode **values;
+    uint32 num_counters;
+    uint16 num_value_sites[2];
+} LLVMProfileData;
+
+/* The profiling data for writting to the output file, the width of
+   pointer is 8 bytes suppose we always use wamrc and llvm-profdata
+   with 64-bit mode */
+typedef struct LLVMProfileData_64 {
+    uint64 func_md5;
+    uint64 func_hash;
+    uint64 offset_counters;
+    uint64 func_ptr;
+    uint64 values;
+    uint32 num_counters;
+    uint16 num_value_sites[2];
+} LLVMProfileData_64;
+#endif /* end of WASM_ENABLE_STATIC_PGO != 0 */
 
 /**
  * Load a AOT module from aot file buffer
@@ -563,6 +661,36 @@ aot_dump_perf_profiling(const AOTModuleInstance *module_inst);
 
 const uint8 *
 aot_get_custom_section(const AOTModule *module, const char *name, uint32 *len);
+
+const void *
+aot_get_data_section_addr(AOTModule *module, const char *section_name,
+                          uint32 *p_data_size);
+
+#if WASM_ENABLE_STATIC_PGO != 0
+void
+llvm_profile_instrument_target(uint64 target_value, void *data,
+                               uint32 counter_idx);
+
+void
+llvm_profile_instrument_memop(uint64 target_value, void *data,
+                              uint32 counter_idx);
+
+uint32
+aot_get_pgo_prof_data_size(AOTModuleInstance *module_inst);
+
+uint32
+aot_dump_pgo_prof_data_to_buf(AOTModuleInstance *module_inst, char *buf,
+                              uint32 len);
+
+void
+aot_exchange_uint16(uint8 *p_data);
+
+void
+aot_exchange_uint32(uint8 *p_data);
+
+void
+aot_exchange_uint64(uint8 *p_data);
+#endif /* end of WASM_ENABLE_STATIC_PGO != 0 */
 
 #ifdef __cplusplus
 } /* end of extern "C" */

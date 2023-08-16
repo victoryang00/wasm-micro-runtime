@@ -7,6 +7,6 @@ rm -fr build && mkdir build
 cd build
 # By default LazyJIT is enabled, to disable it:
 # cmake .. -DWAMR_BUILD_JIT=1 -DWAMR_BUILD_LAZY_JIT=0
-cmake .. -DWAMR_BUILD_JIT=1
+cmake .. -DWAMR_BUILD_AOT=1 -DWAMR_BUILD_AOT_STACK_FRAME=1
 make -j ${nproc}
 cd ..

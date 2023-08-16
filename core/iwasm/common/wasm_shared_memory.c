@@ -37,7 +37,7 @@ typedef struct AtomicWaitNode {
 static HashMap *wait_map;
 
 static uint32
-wait_address_hash(void *address);
+wait_address_hash(const void *address);
 
 static bool
 wait_address_equal(void *h1, void *h2);
@@ -174,7 +174,7 @@ shared_memory_set_memory_inst(WASMModuleCommon *module,
 
 /* Atomics wait && notify APIs */
 static uint32
-wait_address_hash(void *address)
+wait_address_hash(const void *address)
 {
     return (uint32)(uintptr_t)address;
 }
@@ -384,7 +384,7 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
 
     /* unit of timeout is nsec, convert it to usec */
     timeout_left = (uint64)timeout / 1000;
-    timeout_1sec = 1e6;
+    timeout_1sec = (uint64)1e6;
 
     while (1) {
         if (timeout < 0) {

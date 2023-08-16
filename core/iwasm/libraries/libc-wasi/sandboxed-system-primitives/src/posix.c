@@ -14,19 +14,12 @@
 #include "ssp_config.h"
 #include "bh_platform.h"
 #include "wasmtime_ssp.h"
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
 #include "locking.h"
 #include "posix.h"
 #include "random.h"
 #include "refcount.h"
 #include "rights.h"
 #include "str.h"
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-#include "../../../../../include/wamr_export.h"
-#endif
 
 #if 0 /* TODO: -std=gnu99 causes compile error, comment them first */
 // struct iovec must have the same layout as __wasi_iovec_t.
@@ -649,21 +642,13 @@ fd_number(const struct fd_object *fo)
     assert(number >= 0 && "fd_number() called on virtual file descriptor");
     return number;
 }
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-#define CLOSE_NON_STD_FD(fd) \
-    do {                     \
-        if (fd > 2) {        \
-            close(fd);       \
-            remove_fd(fd);   \
-        }                    \
-    } while (0)
-#else
+
 #define CLOSE_NON_STD_FD(fd) \
     do {                     \
         if (fd > 2)          \
             close(fd);       \
     } while (0)
-#endif
+
 // Lowers the reference count on a file descriptor object. When the
 // reference count reaches zero, its resources are cleaned up.
 static void
@@ -1584,9 +1569,6 @@ path_get(struct fd_table *curfds, struct path_access *pa, __wasi_fd_t fd,
     pa->path = pa->path_start = path;
     pa->follow = (flags & __WASI_LOOKUP_SYMLINK_FOLLOW) != 0;
     pa->fd_object = fo;
-#if WASM_BUILD_CHECKPOINT_RESTORE != 0 
-    insert_fd(pa->fd, path, 0);
-#endif
     return 0;
 #else
     // The implementation provides no mechanism to constrain lookups to a
@@ -1641,9 +1623,6 @@ path_get(struct fd_table *curfds, struct path_access *pa, __wasi_fd_t fd,
                 error = __WASI_ENOTCAPABLE;
                 goto fail;
             }
-#if WASM_BUILD_CHECKPOINT_RESTORE != 0
-            remove_fd(curfd-1);
-#endif
             close(fds[curfd--]);
         }
         else if (curpath > 0 || *paths[curpath] != '\0'
@@ -1778,9 +1757,6 @@ success:
     pa->fd = fds[curfd];
     pa->follow = false;
     pa->fd_object = fo;
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_fd(pa->fd, path, 0);
-#endif
     return 0;
 
 fail:
@@ -3126,9 +3102,12 @@ wasi_ssp_sock_addr_resolve(
     }
 
     int ret = os_socket_addr_resolve(
-        host, service, hints->hints_enabled ? &hints_is_tcp : NULL,
-        hints->hints_enabled ? &hints_is_ipv4 : NULL, wamr_addr_info,
-        addr_info_size, &_max_info_size);
+        host, service,
+        hints->hints_enabled && hints->type != SOCKET_ANY ? &hints_is_tcp
+                                                          : NULL,
+        hints->hints_enabled && hints->family != INET_UNSPEC ? &hints_is_ipv4
+                                                             : NULL,
+        wamr_addr_info, addr_info_size, &_max_info_size);
 
     if (ret != BHT_OK) {
         wasm_runtime_free(wamr_addr_info);
