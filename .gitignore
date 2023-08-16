@@ -39,3 +39,5 @@ samples/workload/include/**
 !samples/workload/include/.gitkeep
 
 # core/iwasm/libraries/wasi-threads
+CMakeCache*
+samples/socket-api/*
