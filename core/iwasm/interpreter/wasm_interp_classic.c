@@ -20,11 +20,7 @@
 #if WASM_ENABLE_FAST_JIT != 0
 #include "../fast-jit/jit_compiler.h"
 #endif
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-#include "../../../../../include/wamr_export.h"
-#endif
 
-int counter_ = 0;
 typedef int32 CellType_I32;
 typedef int64 CellType_I64;
 typedef float32 CellType_F32;
@@ -977,7 +973,7 @@ fast_jit_invoke_native(WASMExecEnv *exec_env, uint32 func_idx,
 #endif
 
 #if WASM_ENABLE_MULTI_MODULE != 0
-void
+static void
 wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                                WASMExecEnv *exec_env,
                                WASMFunctionInstance *cur_func,
@@ -1142,7 +1138,7 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
 #endif
 }
 
-void
+static void
 wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                                WASMExecEnv *exec_env,
                                WASMFunctionInstance *cur_func,
