@@ -1451,6 +1451,12 @@ bool
 aot_call_function(WASMExecEnv *exec_env, AOTFunctionInstance *function,
                   unsigned argc, uint32 argv[])
 {
+    if (exec_env->is_restore) {
+         // need to invoke to the label with maintained map
+            // spill register back
+        exec_env->is_restore = false;
+
+    }
     // recovery point
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTFuncType *func_type = function->u.func.func_type;
