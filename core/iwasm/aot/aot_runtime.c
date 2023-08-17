@@ -15,6 +15,13 @@
 #include "../libraries/thread-mgr/thread_manager.h"
 #endif
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "wamr_export.h"
+#define SNAPSHOT_STEP 30
+#define SNAPSHOT_DEBUG_STEP 0
+int counter_ = 0;
+#endif
+
 /*
  * Note: These offsets need to match the values hardcoded in
  * AoT compilation code: aot_create_func_context, check_suspend_flags.
@@ -2673,6 +2680,13 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTModule *module = (AOTModule *)module_inst->module;
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    counter_++;
+    if (counter_>SNAPSHOT_DEBUG_STEP+SNAPSHOT_STEP){
+        serialize_to_file(exec_env);
+    }
+#endif
+
 #if WASM_ENABLE_PERF_PROFILING != 0
     AOTFuncPerfProfInfo *func_perf_prof =
         module_inst->func_perf_profilings + func_index;
@@ -2722,6 +2736,12 @@ aot_free_frame(WASMExecEnv *exec_env)
 {
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    counter_++;
+    if (counter_>SNAPSHOT_DEBUG_STEP+SNAPSHOT_STEP){
+        serialize_to_file(exec_env);
+    }
+#endif
 
 #if WASM_ENABLE_PERF_PROFILING != 0
     cur_frame->func_perf_prof_info->total_exec_time +=
