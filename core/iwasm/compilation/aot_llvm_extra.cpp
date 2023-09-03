@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
+#include <llvm/IR/Value.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/IRBuilder.h>
+#include "llvm/IR/InlineAsm.h"
 #include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/Error.h>
 #include <llvm/ADT/None.h>
@@ -168,6 +173,35 @@ aot_check_simd_compatibility(const char *arch_c_str, const char *cpu_c_str)
     return true;
 #endif /* WASM_ENABLE_SIMD */
 }
+
+struct AddNopPass : public PassInfoMixin<AddNopPass> {
+  public:
+    AddNopPass() {}
+
+    PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM)
+    {
+        for (Function::iterator bb = F.begin(), bbe = F.end(); bb != bbe;
+             ++bb) {
+            BasicBlock &b = *bb;
+
+            int number_of_inst = b.size();
+            if (number_of_inst == 0) {
+                continue;
+            }
+
+            Instruction *first_instruction = &*bb->begin();
+            IRBuilder<> builder(first_instruction);
+            auto voidty = llvm::Type::getVoidTy(F.getContext());
+            auto functy = llvm::FunctionType::get(voidty, false);
+            char myasm[256] = "nop";
+            char myconstraint[256] = { 0 };
+            auto inline_asm =
+                llvm::InlineAsm::get(functy, myasm, myconstraint, true, true);
+            builder.CreateCall(inline_asm);
+        }
+        return PreservedAnalyses::all();
+    }
+};
 
 void
 aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
@@ -342,6 +376,10 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
             MPM.addPass(PB.buildPerModuleDefaultPipeline(OL));
         }
     }
+
+    FunctionPassManager mvvm_fpm;
+    mvvm_fpm.addPass(AddNopPass());
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(mvvm_fpm)));
 
     MPM.run(*M, MAM);
 }
