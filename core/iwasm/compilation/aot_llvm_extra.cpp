@@ -184,20 +184,19 @@ struct AddNopPass : public PassInfoMixin<AddNopPass> {
              ++bb) {
             BasicBlock &b = *bb;
 
-            int number_of_inst = b.size();
-            if (number_of_inst == 0) {
-                continue;
-            }
+            for (auto it = bb->begin(); it != bb->end(); it++) {
+                if (!llvm::isa<llvm::PHINode>(&*it)) {
+                    Instruction *first_instruction = &*it;
 
-            Instruction *first_instruction = &*bb->begin();
-            IRBuilder<> builder(first_instruction);
-            auto voidty = llvm::Type::getVoidTy(F.getContext());
-            auto functy = llvm::FunctionType::get(voidty, false);
-            char myasm[256] = "nop";
-            char myconstraint[256] = { 0 };
-            auto inline_asm =
-                llvm::InlineAsm::get(functy, myasm, myconstraint, true, true);
-            builder.CreateCall(inline_asm);
+                    IRBuilder<> builder(first_instruction);
+                    auto voidty = llvm::Type::getVoidTy(F.getContext());
+                    auto functy = llvm::FunctionType::get(voidty, false);
+                    auto inline_asm =
+                        llvm::InlineAsm::get(functy, "nop", "", true, true);
+                    builder.CreateCall(inline_asm);
+                    break;
+                }
+            }
         }
         return PreservedAnalyses::all();
     }

@@ -2199,12 +2199,15 @@ aot_compiler_init(void)
     LLVMInitializeAllTargetInfos();
     LLVMInitializeAllTargets();
     LLVMInitializeAllTargetMCs();
+    LLVMInitializeAllAsmParsers();
     LLVMInitializeAllAsmPrinters();
 #else
     /* Init environment of native for JIT compiler */
-    LLVMInitializeNativeTarget();
-    LLVMInitializeNativeTarget();
-    LLVMInitializeNativeAsmPrinter();
+    LLVMInitializeAllTargetInfos();
+    LLVMInitializeAllTargets();
+    LLVMInitializeAllTargetMCs();
+    LLVMInitializeAllAsmParsers();
+    LLVMInitializeAllAsmPrinters();
 #endif
 
     return true;
