@@ -2277,16 +2277,27 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
         goto fail;
     }
 
+    LLVMAddModuleFlag(
+        comp_ctx->module, LLVMModuleFlagBehaviorWarning, "Debug Info Version",
+        strlen("Debug Info Version"),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 3, false)));
+
+    LLVMAddModuleFlag(
+        comp_ctx->module, LLVMModuleFlagBehaviorWarning, "CodeView",
+        strlen("CodeView"),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1, false)));
+
+    LLVMAddModuleFlag(
+        comp_ctx->module, LLVMModuleFlagBehaviorWarning, "Dwarf Version",
+        strlen("Dwarf Version"),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 5, false)));
+
+
 #if WASM_ENABLE_DEBUG_AOT != 0
     if (!(comp_ctx->debug_builder = LLVMCreateDIBuilder(comp_ctx->module))) {
         aot_set_last_error("create LLVM Debug Infor builder failed.");
         goto fail;
     }
-
-    LLVMAddModuleFlag(
-        comp_ctx->module, LLVMModuleFlagBehaviorWarning, "Debug Info Version",
-        strlen("Debug Info Version"),
-        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 3, false)));
 
     comp_ctx->debug_file = dwarf_gen_file_info(comp_ctx);
     if (!comp_ctx->debug_file) {

@@ -476,6 +476,9 @@ typedef struct AOTCompContext {
 
     /* Current frame information for translation */
     AOTCompFrame *aot_frame;
+
+    /* AOT output file name, to generate {aot_file_name}.o file for analysis */
+    const char* aot_file_name;
 } AOTCompContext;
 
 enum {
