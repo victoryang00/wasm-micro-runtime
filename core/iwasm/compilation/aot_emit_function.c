@@ -500,7 +500,7 @@ aot_estimate_and_record_stack_usage_for_function_call(
 
 bool
 aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
-                    uint32 func_idx, bool tail_call)
+                    uint32 func_idx, bool tail_call, uint8 **p_frame_ip)
 {
     uint32 import_func_count = comp_ctx->comp_data->import_func_count;
     AOTImportFunc *import_funcs = comp_ctx->comp_data->import_funcs;
@@ -521,8 +521,12 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     bool ret = false;
     char buf[32];
 
-    if (comp_ctx->aot_frame && !aot_gen_commit_values(comp_ctx->aot_frame)) {
-        return false;
+    if (comp_ctx->aot_frame) {
+        if (!aot_gen_commit_values(comp_ctx->aot_frame))
+            return false;
+        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
+                                  *p_frame_ip))
+            return false;
     }
 
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -1060,7 +1064,8 @@ call_aot_call_indirect_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
 bool
 aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
-                             uint32 type_idx, uint32 tbl_idx)
+                             uint32 type_idx, uint32 tbl_idx,
+                             uint8 **p_frame_ip)
 {
     AOTFuncType *func_type;
     LLVMValueRef tbl_idx_value, elem_idx, table_elem, func_idx;
@@ -1084,7 +1089,9 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     char buf[32];
     bool ret = false;
 
-    if (comp_ctx->aot_frame && !aot_gen_commit_values(comp_ctx->aot_frame)) {
+    if (comp_ctx->aot_frame && !aot_gen_commit_values(comp_ctx->aot_frame)
+        && !aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
+                                 *p_frame_ip)) {
         return false;
     }
 

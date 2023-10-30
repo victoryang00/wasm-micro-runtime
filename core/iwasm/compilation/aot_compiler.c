@@ -1,4 +1,4 @@
-  /*
+/*
  * Copyright (C) 2019 Intel Corporation. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
@@ -302,8 +302,8 @@ aot_gen_commit_sp_ip(AOTCompFrame *frame, AOTValueSlot *sp, uint8 *ip)
     bool is_64bit = (comp_ctx->pointer_size == sizeof(uint64)) ? true : false;
 
     if (!comp_ctx->is_jit_mode) {
-        offset_ip = (uint32)sizeof(uintptr_t) * 4;
-        offset_sp = (uint32)sizeof(uintptr_t) * 5;
+        offset_ip = offsetof(WASMInterpFrame, ip);
+        offset_sp = offsetof(WASMInterpFrame, sp);
     }
     else {
         offset_ip = offsetof(WASMInterpFrame, ip);
@@ -580,6 +580,17 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
     LLVMPositionBuilderAtEnd(
         comp_ctx->builder,
         func_ctx->block_stack.block_list_head->llvm_entry_block);
+
+#define EMIT_CHECKPOINT()                                \
+    if (!aot_gen_commit_values(comp_ctx->aot_frame))     \
+        return false;                                    \
+    if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx)) \
+        return false;
+
+    // fprintf(stderr, "Compiling aot_func#%d\n", func_index);
+
+    EMIT_CHECKPOINT();
+
     while (frame_ip < frame_ip_end) {
         opcode = *frame_ip++;
 
@@ -741,7 +752,8 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_CALL:
                 read_leb_uint32(frame_ip, frame_ip_end, func_idx);
-                if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, false))
+                if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, false,
+                                         &frame_ip))
                     return false;
                 break;
 
@@ -763,7 +775,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 }
 
                 if (!aot_compile_op_call_indirect(comp_ctx, func_ctx, type_idx,
-                                                  tbl_idx))
+                                                  tbl_idx, &frame_ip))
                     return false;
                 break;
             }
@@ -775,7 +787,8 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     return false;
                 }
                 read_leb_uint32(frame_ip, frame_ip_end, func_idx);
-                if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, true))
+                if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, true,
+                                         &frame_ip))
                     return false;
                 if (!aot_compile_op_return(comp_ctx, func_ctx, &frame_ip))
                     return false;
@@ -803,7 +816,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 }
 
                 if (!aot_compile_op_call_indirect(comp_ctx, func_ctx, type_idx,
-                                                  tbl_idx))
+                                                  tbl_idx, &frame_ip))
                     return false;
                 if (!aot_compile_op_return(comp_ctx, func_ctx, &frame_ip))
                     return false;
@@ -3037,6 +3050,8 @@ aot_compile_wasm(AOTCompContext *comp_ctx)
             return false;
         }
     }
+
+    // aot_apply_mvvm_pass(comp_ctx, comp_ctx->module);
 
     /* Run IR optimization before feeding in ORCJIT and AOT codegen */
     if (comp_ctx->optimize) {

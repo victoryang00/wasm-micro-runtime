@@ -75,6 +75,9 @@ aot_add_simple_loop_unswitch_pass(LLVMPassManagerRef pass);
 void
 aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module);
 
+void
+aot_apply_mvvm_pass(AOTCompContext *comp_ctx, LLVMModuleRef module);
+
 LLVM_C_EXTERN_C_END
 
 ExitOnError ExitOnErr;
@@ -230,6 +233,10 @@ struct AddNopPass : public PassInfoMixin<AddNopPass> {
                     auto dummy_inst = builder.CreateCall(donothing_func);
                     dummy_inst->setDebugLoc(
                         DILocation::get(context, getLineNo(), 2, sp));
+
+                    auto fence_inst = builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
+                    fence_inst->setDebugLoc(
+                        DILocation::get(context, getLineNo(), 514, sp));
 
                     auto asm_inst = builder.CreateCall(inline_asm);
                     asm_inst->setDebugLoc(
@@ -420,6 +427,29 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
             MPM.addPass(PB.buildPerModuleDefaultPipeline(OL));
         }
     }
+    MPM.run(*M, MAM);
+}
+
+void
+aot_apply_mvvm_pass(AOTCompContext *comp_ctx, LLVMModuleRef module)
+{
+    PassBuilder PB;
+
+    /* Register all the basic analyses with the managers */
+    LoopAnalysisManager LAM;
+    FunctionAnalysisManager FAM;
+    CGSCCAnalysisManager CGAM;
+    ModuleAnalysisManager MAM;
+
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.registerModuleAnalyses(MAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    Module *M = reinterpret_cast<Module *>(module);
+
+    ModulePassManager MPM;
 
     FunctionPassManager mvvm_fpm;
     mvvm_fpm.addPass(AddNopPass());

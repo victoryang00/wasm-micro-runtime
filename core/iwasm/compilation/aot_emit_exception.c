@@ -143,3 +143,30 @@ aot_emit_exception(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 fail:
     return false;
 }
+
+bool
+aot_compile_emit_fence_nop(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
+{
+    LLVMValueRef value, inline_asm;
+    if (!(value = LLVMBuildFence(comp_ctx->builder,
+                                 LLVMAtomicOrderingSequentiallyConsistent,
+                                 false, ""))) {
+        aot_set_last_error("llvm build fence failed.");
+        return false;
+    }
+    LLVMTypeRef ty = LLVMFunctionType(LLVMVoidType(), NULL, 0, false);
+    char *asm_string = strdup("int $$3");
+    if (!(inline_asm = LLVMGetInlineAsm(
+              ty, asm_string, strlen(asm_string), "~{dirflag},~{fpsr},~{flags}",
+              27, true, false, LLVMInlineAsmDialectATT, false))) {
+        aot_set_last_error("llvm build nop asm failed.");
+        return false;
+    }
+    free(asm_string);
+    if (!(value =
+              LLVMBuildCall2(comp_ctx->builder, ty, inline_asm, NULL, 0, ""))) {
+        aot_set_last_error("llvm build call nop failed.");
+        return false;
+    }
+    return true;
+}

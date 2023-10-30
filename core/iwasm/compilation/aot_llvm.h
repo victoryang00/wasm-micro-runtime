@@ -621,6 +621,9 @@ void
 aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module);
 
 void
+aot_apply_mvvm_pass(AOTCompContext *comp_ctx, LLVMModuleRef module);
+
+void
 aot_handle_llvm_errmsg(const char *string, LLVMErrorRef err);
 
 char *

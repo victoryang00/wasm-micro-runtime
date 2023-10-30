@@ -15,9 +15,10 @@
 #include "../libraries/thread-mgr/thread_manager.h"
 #endif
 
+#include "wasm_interp.h"
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 #include "wamr_export.h"
-#define SNAPSHOT_STEP 30
+#define SNAPSHOT_STEP 1e9
 #define SNAPSHOT_DEBUG_STEP 0
 int counter_ = 0;
 #endif
@@ -2729,6 +2730,12 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     frame->func_perf_prof_info = func_perf_prof;
 #endif
     frame->sp = frame->lp + max_local_cell_num;
+
+    // if (exec_env->cur_frame) {
+    //     fprintf(stderr, "aot_alloc_frame cur_frame->ip %zu\n", (size_t)exec_env->cur_frame->ip);
+    // } else {
+    //     fprintf(stderr, "aot_alloc_frame cur_frame NULL\n");
+    // }
 
     frame->prev_frame = (AOTFrame *)exec_env->cur_frame;
     exec_env->cur_frame = (struct WASMInterpFrame *)frame;
