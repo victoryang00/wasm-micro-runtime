@@ -581,17 +581,22 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         comp_ctx->builder,
         func_ctx->block_stack.block_list_head->llvm_entry_block);
 
-#define EMIT_CHECKPOINT()                                \
-    if (!aot_gen_commit_values(comp_ctx->aot_frame))     \
-        return false;                                    \
-    if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx)) \
+#define EMIT_CHECKPOINT()                                                   \
+    if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp, \
+                              frame_ip))                                    \
+        return false;
+    if (!aot_gen_commit_values(comp_ctx->aot_frame))
+        return false;
+    if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))
         return false;
 
     // fprintf(stderr, "Compiling aot_func#%d\n", func_index);
 
-    EMIT_CHECKPOINT();
+    // EMIT_CHECKPOINT();
 
     while (frame_ip < frame_ip_end) {
+        EMIT_CHECKPOINT();
+
         opcode = *frame_ip++;
 
 #if WASM_ENABLE_DEBUG_AOT != 0
@@ -655,8 +660,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case EXT_OP_LOOP:
             case EXT_OP_IF:
             case WASM_OP_ELSE:
-                aot_set_last_error(
-                    "encounter opcode without aot csp support.");
+                aot_set_last_error("encounter opcode without aot csp support.");
                 goto fail;
                 break;
 
