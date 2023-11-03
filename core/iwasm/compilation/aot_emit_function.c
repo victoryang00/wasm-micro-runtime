@@ -522,10 +522,10 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     char buf[32];
 
     if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
         if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
                                   *p_frame_ip))
+            return false;
+        if (!aot_gen_commit_values(comp_ctx->aot_frame))
             return false;
     }
 
@@ -760,7 +760,6 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
             if (!check_exception_thrown(comp_ctx, func_ctx)) {
                 goto fail;
             }
-
         }
     }
     else {

@@ -302,8 +302,8 @@ aot_gen_commit_sp_ip(AOTCompFrame *frame, AOTValueSlot *sp, uint8 *ip)
     bool is_64bit = (comp_ctx->pointer_size == sizeof(uint64)) ? true : false;
 
     if (!comp_ctx->is_jit_mode) {
-        offset_ip = offsetof(WASMInterpFrame, ip);
-        offset_sp = offsetof(WASMInterpFrame, sp);
+        offset_ip = offsetof(AOTFrame, ip_offset);
+        offset_sp = offsetof(AOTFrame, sp);
     }
     else {
         offset_ip = offsetof(WASMInterpFrame, ip);
@@ -612,7 +612,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_BLOCK:
             case WASM_OP_LOOP:
-            case WASM_OP_IF:
             {
                 value_type = *frame_ip++;
                 if (value_type == VALUE_TYPE_I32 || value_type == VALUE_TYPE_I64
@@ -651,27 +650,14 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
             }
 
+            case WASM_OP_IF:
             case EXT_OP_BLOCK:
             case EXT_OP_LOOP:
             case EXT_OP_IF:
-            {
-                read_leb_uint32(frame_ip, frame_ip_end, type_index);
-                func_type = comp_ctx->comp_data->func_types[type_index];
-                param_count = func_type->param_count;
-                param_types = func_type->types;
-                result_count = func_type->result_count;
-                result_types = func_type->types + param_count;
-                if (!aot_compile_op_block(
-                        comp_ctx, func_ctx, &frame_ip, frame_ip_end,
-                        (uint32)(LABEL_TYPE_BLOCK + opcode - EXT_OP_BLOCK),
-                        param_count, param_types, result_count, result_types))
-                    return false;
-                break;
-            }
-
             case WASM_OP_ELSE:
-                if (!aot_compile_op_else(comp_ctx, func_ctx, &frame_ip))
-                    return false;
+                aot_set_last_error(
+                    "encounter opcode without aot csp support.");
+                goto fail;
                 break;
 
             case WASM_OP_END:

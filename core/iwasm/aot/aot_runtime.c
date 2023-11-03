@@ -2729,6 +2729,7 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     frame->time_started = (uintptr_t)os_time_get_boot_microsecond();
     frame->func_perf_prof_info = func_perf_prof;
 #endif
+    frame->ip_offset = 0;
     frame->sp = frame->lp + max_local_cell_num;
 
     // if (exec_env->cur_frame) {
