@@ -9,6 +9,7 @@
 #include "aot.h"
 #include "aot_llvm.h"
 #include "../interpreter/wasm_interp.h"
+#include "aot_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,7 +125,7 @@ offset_of_local(AOTCompContext *comp_ctx, unsigned n)
     if (!comp_ctx->is_jit_mode)
         return comp_ctx->pointer_size * 6 + sizeof(uint32) * n;
     else
-        return offsetof(WASMInterpFrame, lp) + sizeof(uint32) * n;
+        return offsetof(AOTFrame, lp) + sizeof(uint32) * n;
 }
 
 /**
