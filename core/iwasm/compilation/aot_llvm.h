@@ -90,6 +90,9 @@ typedef struct AOTValueSlot {
     /* The LLVM value of this slot */
     LLVMValueRef value;
 
+    /* The pointer to the stack entry */
+    AOTValue *stack_value;
+
     /* The value type of this slot */
     uint8 type;
 
@@ -237,6 +240,8 @@ typedef struct AOTFuncContext {
 #if WASM_ENABLE_DEBUG_AOT != 0
     LLVMMetadataRef debug_func;
 #endif
+
+    LLVMValueRef restore_switch;
 
     unsigned int stack_consumption_for_func_call;
 
@@ -478,7 +483,7 @@ typedef struct AOTCompContext {
     AOTCompFrame *aot_frame;
 
     /* AOT output file name, to generate {aot_file_name}.o file for analysis */
-    const char* aot_file_name;
+    const char *aot_file_name;
 } AOTCompContext;
 
 enum {

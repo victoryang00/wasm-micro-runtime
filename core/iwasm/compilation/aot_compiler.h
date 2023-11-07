@@ -156,6 +156,7 @@ static inline void
 push_32bit(AOTCompFrame *frame, AOTValue *aot_value)
 {
     frame->sp->value = aot_value->value;
+    frame->sp->stack_value = aot_value;
     frame->sp->type = aot_value->type;
     frame->sp->dirty = 1;
     frame->sp++;
@@ -285,6 +286,7 @@ static inline void
 set_local_i32(AOTCompFrame *frame, int n, LLVMValueRef value)
 {
     frame->lp[n].value = value;
+    frame->lp[n].stack_value = NULL;
     frame->lp[n].type = VALUE_TYPE_I32;
     frame->lp[n].dirty = 1;
 }
@@ -293,9 +295,11 @@ static inline void
 set_local_i64(AOTCompFrame *frame, int n, LLVMValueRef value)
 {
     frame->lp[n].value = value;
+    frame->lp[n].stack_value = NULL;
     frame->lp[n].type = VALUE_TYPE_I64;
     frame->lp[n].dirty = 1;
     frame->lp[n + 1].value = value;
+    frame->lp[n + 1].stack_value = NULL;
     frame->lp[n + 1].type = VALUE_TYPE_I64;
     frame->lp[n + 1].dirty = 1;
 }
@@ -304,6 +308,7 @@ static inline void
 set_local_f32(AOTCompFrame *frame, int n, LLVMValueRef value)
 {
     frame->lp[n].value = value;
+    frame->lp[n].stack_value = NULL;
     frame->lp[n].type = VALUE_TYPE_F32;
     frame->lp[n].dirty = 1;
 }
@@ -312,9 +317,11 @@ static inline void
 set_local_f64(AOTCompFrame *frame, int n, LLVMValueRef value)
 {
     frame->lp[n].value = value;
+    frame->lp[n].stack_value = NULL;
     frame->lp[n].type = VALUE_TYPE_F64;
     frame->lp[n].dirty = 1;
     frame->lp[n + 1].value = value;
+    frame->lp[n + 1].stack_value = NULL;
     frame->lp[n + 1].type = VALUE_TYPE_F64;
     frame->lp[n + 1].dirty = 1;
 }
@@ -325,6 +332,7 @@ set_local_v128(AOTCompFrame *frame, int n, LLVMValueRef value)
     uint32 i;
     for (i = 0; i < 4; i++) {
         frame->lp[n + i].value = value;
+        frame->lp[n + i].stack_value = NULL;
         frame->lp[n + i].type = VALUE_TYPE_V128;
         frame->lp[n + i].dirty = 1;
     }
@@ -335,6 +343,7 @@ set_local_ref(AOTCompFrame *frame, int n, LLVMValueRef value, uint8 ref_type)
 {
     bh_assert(frame->comp_ctx->enable_ref_types);
     frame->lp[n].value = value;
+    frame->lp[n].stack_value = NULL;
     frame->lp[n].type = ref_type;
     frame->lp[n].dirty = 1;
 }

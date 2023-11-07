@@ -1452,13 +1452,6 @@ bool
 aot_call_function(WASMExecEnv *exec_env, AOTFunctionInstance *function,
                   unsigned argc, uint32 argv[])
 {
-    if (exec_env->is_restore) {
-         // need to invoke to the label with maintained map
-            // spill register back
-        exec_env->is_restore = false;
-
-    }
-    // recovery point
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTFuncType *func_type = function->u.func.func_type;
     uint32 result_count = func_type->result_count;
@@ -2685,15 +2678,9 @@ get_func_name_from_index(const AOTModuleInstance *module_inst,
 bool
 aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
+    // fprintf(stderr, "aot_alloc_frame %d\n", func_index);
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTModule *module = (AOTModule *)module_inst->module;
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
-    counter_++;
-    if (counter_>SNAPSHOT_DEBUG_STEP+SNAPSHOT_STEP){
-        serialize_to_file(exec_env);
-    }
-#endif
-
 #if WASM_ENABLE_PERF_PROFILING != 0
     AOTFuncPerfProfInfo *func_perf_prof =
         module_inst->func_perf_profilings + func_index;
@@ -2701,6 +2688,20 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     AOTFrame *frame;
     uint32 max_local_cell_num, max_stack_cell_num, all_cell_num;
     uint32 aot_func_idx, frame_size;
+
+    if (exec_env->restore_call_chain) {
+        frame = exec_env->restore_call_chain[exec_env->call_chain_size - 1];
+        // fprintf(stderr, "frame restored, func idx %zu\n", frame->func_index);
+        exec_env->call_chain_size--;
+        frame->prev_frame = (AOTFrame *)exec_env->cur_frame;
+        exec_env->cur_frame = (struct WASMInterpFrame *)frame;
+        if (exec_env->call_chain_size == 0) {
+            // TODO: fix memory leak
+            exec_env->restore_call_chain = NULL;
+            exec_env->is_restore = false;
+        }
+        return true;
+    }
 
     if (func_index >= module->import_func_count) {
         aot_func_idx = func_index - module->import_func_count;
@@ -2733,7 +2734,8 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     frame->sp = frame->lp + max_local_cell_num;
 
     // if (exec_env->cur_frame) {
-    //     fprintf(stderr, "aot_alloc_frame cur_frame->ip %zu\n", (size_t)exec_env->cur_frame->ip);
+    //     fprintf(stderr, "aot_alloc_frame cur_frame->ip %zu\n",
+    //     (size_t)exec_env->cur_frame->ip);
     // } else {
     //     fprintf(stderr, "aot_alloc_frame cur_frame NULL\n");
     // }
@@ -2748,11 +2750,12 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 void
 aot_free_frame(WASMExecEnv *exec_env)
 {
+    // fprintf(stderr, "aot_free_frame %zu\n", ((AOTFrame*)exec_env->cur_frame)->func_index);
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     counter_++;
-    if (counter_>SNAPSHOT_DEBUG_STEP+SNAPSHOT_STEP){
+    if (counter_ > SNAPSHOT_DEBUG_STEP + SNAPSHOT_STEP) {
         serialize_to_file(exec_env);
     }
 #endif
@@ -2762,7 +2765,7 @@ aot_free_frame(WASMExecEnv *exec_env)
         (uintptr_t)os_time_get_boot_microsecond() - cur_frame->time_started;
     cur_frame->func_perf_prof_info->total_exec_cnt++;
 #endif
-#if WASM_ENABLE_CHECKPOINT_SNAPSHOT !=0
+#if WASM_ENABLE_CHECKPOINT_SNAPSHOT != 0
 // snapshot
 #endif
     wasm_exec_env_free_wasm_frame(exec_env, cur_frame);
