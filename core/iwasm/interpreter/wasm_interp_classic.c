@@ -710,28 +710,28 @@ trunc_f64_to_int(WASMModuleInstance *module, uint32 *frame_sp, float64 src_min,
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 1, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = (uint32)(*(uint8 *)maddr);                       \
             *(uint8 *)maddr = (uint8)(readv op sval);                \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         else if (opcode == WASM_OP_ATOMIC_RMW_I32_##OP_NAME##16_U) { \
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = (uint32)LOAD_U16(maddr);                         \
             STORE_U16(maddr, (uint16)(readv op sval));               \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         else {                                                       \
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = LOAD_I32(maddr);                                 \
             STORE_U32(maddr, readv op sval);                         \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         PUSH_I32(readv);                                             \
         break;                                                       \
@@ -750,39 +750,39 @@ trunc_f64_to_int(WASMModuleInstance *module, uint32 *frame_sp, float64 src_min,
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 1, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = (uint64)(*(uint8 *)maddr);                       \
             *(uint8 *)maddr = (uint8)(readv op sval);                \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         else if (opcode == WASM_OP_ATOMIC_RMW_I64_##OP_NAME##16_U) { \
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = (uint64)LOAD_U16(maddr);                         \
             STORE_U16(maddr, (uint16)(readv op sval));               \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         else if (opcode == WASM_OP_ATOMIC_RMW_I64_##OP_NAME##32_U) { \
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = (uint64)LOAD_U32(maddr);                         \
             STORE_U32(maddr, (uint32)(readv op sval));               \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         else {                                                       \
             uint64 op_result;                                        \
             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 8, maddr);     \
             CHECK_ATOMIC_MEMORY_ACCESS();                            \
                                                                      \
-            os_mutex_lock(&node->shared_mem_lock);                   \
+            shared_memory_lock(memory);                              \
             readv = (uint64)LOAD_I64(maddr);                         \
             op_result = readv op sval;                               \
             STORE_I64(maddr, op_result);                             \
-            os_mutex_unlock(&node->shared_mem_lock);                 \
+            shared_memory_unlock(memory);                            \
         }                                                            \
         PUSH_I64(readv);                                             \
         break;                                                       \
@@ -905,8 +905,9 @@ wasm_interp_call_func_native(WASMModuleInstance *module_inst,
     if (!func_import->call_conv_wasm_c_api) {
         native_func_pointer = module_inst->import_func_ptrs[cur_func_index];
     }
-    else if (module_inst->e->c_api_func_imports) {
-        c_api_func_import = module_inst->e->c_api_func_imports + cur_func_index;
+    else if (module_inst->e->common.c_api_func_imports) {
+        c_api_func_import =
+            module_inst->e->common.c_api_func_imports + cur_func_index;
         native_func_pointer = c_api_func_import->func_ptr_linked;
     }
 
@@ -1062,21 +1063,33 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
         os_mutex_unlock(&exec_env->wait_lock);                         \
     } while (0)
 #else
-#define CHECK_SUSPEND_FLAGS()                                             \
-    do {                                                                  \
-        os_mutex_lock(&exec_env->wait_lock);                              \
-        if (exec_env->suspend_flags.flags != 0) {                         \
-            if (exec_env->suspend_flags.flags & 0x01) {                   \
-                /* terminate current thread */                            \
-                os_mutex_unlock(&exec_env->wait_lock);                    \
-                return;                                                   \
-            }                                                             \
-            while (exec_env->suspend_flags.flags & 0x02) {                \
-                /* suspend current thread */                              \
-                os_cond_wait(&exec_env->wait_cond, &exec_env->wait_lock); \
-            }                                                             \
-        }                                                                 \
-        os_mutex_unlock(&exec_env->wait_lock);                            \
+#if WASM_SUSPEND_FLAGS_IS_ATOMIC != 0
+/* The lock is only needed when the suspend_flags is atomic; otherwise
+   the lock is already taken at the time when SUSPENSION_LOCK() is called. */
+#define SUSPENSION_LOCK() os_mutex_lock(&exec_env->wait_lock);
+#define SUSPENSION_UNLOCK() os_mutex_unlock(&exec_env->wait_lock);
+#else
+#define SUSPENSION_LOCK()
+#define SUSPENSION_UNLOCK()
+#endif
+
+#define CHECK_SUSPEND_FLAGS()                                         \
+    do {                                                              \
+        WASM_SUSPEND_FLAGS_LOCK(exec_env->wait_lock);                 \
+        if (WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags)           \
+            & WASM_SUSPEND_FLAG_TERMINATE) {                          \
+            /* terminate current thread */                            \
+            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->wait_lock);           \
+            return;                                                   \
+        }                                                             \
+        while (WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags)        \
+               & WASM_SUSPEND_FLAG_SUSPEND) {                         \
+            /* suspend current thread */                              \
+            SUSPENSION_LOCK()                                         \
+            os_cond_wait(&exec_env->wait_cond, &exec_env->wait_lock); \
+            SUSPENSION_UNLOCK()                                       \
+        }                                                             \
+        WASM_SUSPEND_FLAGS_UNLOCK(exec_env->wait_lock);               \
     } while (0)
 #endif /* WASM_ENABLE_DEBUG_INTERP */
 #endif /* WASM_ENABLE_THREAD_MGR */
@@ -1144,10 +1157,6 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                                WASMFunctionInstance *cur_func,
                                WASMInterpFrame *prev_frame)
 {
-#if WASM_ENABLE_SHARED_MEMORY != 0
-    WASMSharedMemNode *node =
-        wasm_module_get_shared_memory((WASMModuleCommon *)module->module);
-#endif
     WASMMemoryInstance *memory = wasm_get_default_memory(module);
 #if !defined(OS_ENABLE_HW_BOUND_CHECK)              \
     || WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0 \
@@ -1417,6 +1426,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 while (node_cache) {
                     node_next = bh_list_elem_next(node_cache);
                     if (node_cache->br_table_op_addr == frame_ip - 1) {
+                        if (lidx > node_cache->br_count)
+                            lidx = node_cache->br_count;
                         depth = node_cache->br_depths[lidx];
                         goto label_pop_csp_n;
                     }
@@ -3243,7 +3254,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     case WASM_OP_TABLE_INIT:
                     {
                         uint32 tbl_idx, elem_idx;
-                        uint64 n, s, d;
+                        uint32 n, s, d;
                         WASMTableInstance *tbl_inst;
 
                         read_leb_uint32(frame_ip, frame_ip_end, elem_idx);
@@ -3258,18 +3269,19 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         s = (uint32)POP_I32();
                         d = (uint32)POP_I32();
 
-                        /* TODO: what if the element is not passive? */
-
-                        if (!n) {
-                            break;
-                        }
-
-                        if (n + s > module->module->table_segments[elem_idx]
-                                        .function_count
-                            || d + n > tbl_inst->cur_size) {
+                        if (offset_len_out_of_bounds(
+                                s, n,
+                                module->module->table_segments[elem_idx]
+                                    .function_count)
+                            || offset_len_out_of_bounds(d, n,
+                                                        tbl_inst->cur_size)) {
                             wasm_set_exception(module,
                                                "out of bounds table access");
                             goto got_exception;
+                        }
+
+                        if (!n) {
+                            break;
                         }
 
                         if (module->module->table_segments[elem_idx]
@@ -3312,7 +3324,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     case WASM_OP_TABLE_COPY:
                     {
                         uint32 src_tbl_idx, dst_tbl_idx;
-                        uint64 n, s, d;
+                        uint32 n, s, d;
                         WASMTableInstance *src_tbl_inst, *dst_tbl_inst;
 
                         read_leb_uint32(frame_ip, frame_ip_end, dst_tbl_idx);
@@ -3329,8 +3341,10 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         s = (uint32)POP_I32();
                         d = (uint32)POP_I32();
 
-                        if (d + n > dst_tbl_inst->cur_size
-                            || s + n > src_tbl_inst->cur_size) {
+                        if (offset_len_out_of_bounds(d, n,
+                                                     dst_tbl_inst->cur_size)
+                            || offset_len_out_of_bounds(
+                                s, n, src_tbl_inst->cur_size)) {
                             wasm_set_exception(module,
                                                "out of bounds table access");
                             goto got_exception;
@@ -3400,11 +3414,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         fill_val = POP_I32();
                         i = POP_I32();
 
-                        /* TODO: what if the element is not passive? */
-                        /* TODO: what if the element is dropped? */
-
-                        if (i + n > tbl_inst->cur_size) {
-                            /* TODO: verify warning content */
+                        if (offset_len_out_of_bounds(i, n,
+                                                     tbl_inst->cur_size)) {
                             wasm_set_exception(module,
                                                "out of bounds table access");
                             goto got_exception;
@@ -3522,23 +3533,23 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         if (opcode == WASM_OP_ATOMIC_I32_LOAD8_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 1, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint32)(*(uint8 *)maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_I32_LOAD16_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint32)LOAD_U16(maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = LOAD_I32(maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
 
                         PUSH_I32(readv);
@@ -3557,30 +3568,30 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         if (opcode == WASM_OP_ATOMIC_I64_LOAD8_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 1, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)(*(uint8 *)maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_I64_LOAD16_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)LOAD_U16(maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_I64_LOAD32_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)LOAD_U32(maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 8, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = LOAD_I64(maddr);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
 
                         PUSH_I64(readv);
@@ -3599,23 +3610,23 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         if (opcode == WASM_OP_ATOMIC_I32_STORE8) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 1, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             *(uint8 *)maddr = (uint8)sval;
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_I32_STORE16) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             STORE_U16(maddr, (uint16)sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             STORE_U32(maddr, sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         break;
                     }
@@ -3633,30 +3644,30 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         if (opcode == WASM_OP_ATOMIC_I64_STORE8) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 1, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             *(uint8 *)maddr = (uint8)sval;
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_I64_STORE16) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             STORE_U16(maddr, (uint16)sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_I64_STORE32) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             STORE_U32(maddr, (uint32)sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 8, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             PUT_I64_TO_ADDR((uint32 *)maddr, sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         break;
                     }
@@ -3676,32 +3687,32 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
                             expect = (uint8)expect;
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint32)(*(uint8 *)maddr);
                             if (readv == expect)
                                 *(uint8 *)maddr = (uint8)(sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_RMW_I32_CMPXCHG16_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
                             expect = (uint16)expect;
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint32)LOAD_U16(maddr);
                             if (readv == expect)
                                 STORE_U16(maddr, (uint16)(sval));
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = LOAD_I32(maddr);
                             if (readv == expect)
                                 STORE_U32(maddr, sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         PUSH_I32(readv);
                         break;
@@ -3722,43 +3733,43 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
                             expect = (uint8)expect;
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)(*(uint8 *)maddr);
                             if (readv == expect)
                                 *(uint8 *)maddr = (uint8)(sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_RMW_I64_CMPXCHG16_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 2, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
                             expect = (uint16)expect;
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)LOAD_U16(maddr);
                             if (readv == expect)
                                 STORE_U16(maddr, (uint16)(sval));
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else if (opcode == WASM_OP_ATOMIC_RMW_I64_CMPXCHG32_U) {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 4, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
                             expect = (uint32)expect;
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)LOAD_U32(maddr);
                             if (readv == expect)
                                 STORE_U32(maddr, (uint32)(sval));
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         else {
                             CHECK_BULK_MEMORY_OVERFLOW(addr + offset, 8, maddr);
                             CHECK_ATOMIC_MEMORY_ACCESS();
 
-                            os_mutex_lock(&node->shared_mem_lock);
+                            shared_memory_lock(memory);
                             readv = (uint64)LOAD_I64(maddr);
                             if (readv == expect)
                                 STORE_I64(maddr, sval);
-                            os_mutex_unlock(&node->shared_mem_lock);
+                            shared_memory_unlock(memory);
                         }
                         PUSH_I64(readv);
                         break;
@@ -3791,7 +3802,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             HANDLE_OP(DEBUG_OP_BREAK)
             {
                 wasm_cluster_thread_send_signal(exec_env, WAMR_SIG_TRAP);
-                exec_env->suspend_flags.flags |= 2;
+                WASM_SUSPEND_FLAGS_FETCH_OR(exec_env->suspend_flags,
+                                            WASM_SUSPEND_FLAG_SUSPEND);
                 frame_ip--;
                 SYNC_ALL_TO_FRAME();
                 CHECK_SUSPEND_FLAGS();
@@ -4005,10 +4017,12 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 }
 
 #if WASM_ENABLE_FAST_JIT != 0
-/* ASAN is not designed to work with custom stack unwind or other low-level \
- things. > Ignore a function that does some low-level magic. (e.g. walking \
- through the thread's stack bypassing the frame boundaries) */
-#if defined(__GNUC__)
+/*
+ * ASAN is not designed to work with custom stack unwind or other low-level
+ * things. Ignore a function that does some low-level magic. (e.g. walking
+ * through the thread's stack bypassing the frame boundaries)
+ */
+#if defined(__GNUC__) || defined(__clang__)
 __attribute__((no_sanitize_address))
 #endif
 static void
@@ -4207,7 +4221,6 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
     unsigned frame_size = wasm_interp_interp_frame_size(all_cell_num);
     unsigned i;
     bool copy_argv_from_frame = true;
-    char exception[EXCEPTION_BUF_LEN];
 
     if (argc < function->param_cell_num) {
         char buf[128];
@@ -4340,8 +4353,6 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
             wasm_interp_dump_call_stack(exec_env, true, NULL, 0);
         }
 #endif
-        wasm_copy_exception(module_inst, exception);
-        LOG_DEBUG("meet an exception %s", exception);
     }
 
     wasm_exec_env_set_cur_frame(exec_env, prev_frame);

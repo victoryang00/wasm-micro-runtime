@@ -694,34 +694,10 @@ wasm_loader_find_export(const WASMModule *module, const char *module_name,
                         const char *field_name, uint8 export_kind,
                         char *error_buf, uint32 error_buf_size)
 {
-    WASMExport *export;
-    uint32 i;
-
-    for (i = 0, export = module->exports; i < module->export_count;
-         ++i, ++export) {
-        /**
-         * need to consider a scenario that different kinds of exports
-         * may have the same name, like
-         * (table (export "m1" "exported") 10 funcref)
-         * (memory (export "m1" "exported") 10)
-         **/
-        if (export->kind == export_kind && !strcmp(field_name, export->name)) {
-            break;
-        }
-    }
-
-    if (i == module->export_count) {
-        LOG_DEBUG("can not find an export %d named %s in the module %s",
-                  export_kind, field_name, module_name);
-        set_error_buf(error_buf, error_buf_size,
-                      "unknown import or incompatible import type");
-        return NULL;
-    }
-
-    (void)module_name;
-
-    /* since there is a validation in load_export_section(), it is for sure
-     * export->index is valid*/
+    WASMExport *export =
+        loader_find_export((WASMModuleCommon *)module, module_name, field_name,
+                           export_kind, error_buf, error_buf_size);
+    ;
     return export;
 }
 #endif
@@ -912,152 +888,6 @@ wasm_loader_resolve_global(const char *module_name, const char *global_name,
     return global;
 }
 
-static WASMModule *
-search_sub_module(const WASMModule *parent_module, const char *sub_module_name)
-{
-    WASMRegisteredModule *node =
-        bh_list_first_elem(parent_module->import_module_list);
-    while (node && strcmp(sub_module_name, node->module_name)) {
-        node = bh_list_elem_next(node);
-    }
-    return node ? (WASMModule *)node->module : NULL;
-}
-
-static bool
-register_sub_module(const WASMModule *parent_module,
-                    const char *sub_module_name, WASMModule *sub_module)
-{
-    /* register sub_module into its parent sub module list */
-    WASMRegisteredModule *node = NULL;
-    bh_list_status ret;
-
-    if (search_sub_module(parent_module, sub_module_name)) {
-        LOG_DEBUG("%s has been registered in its parent", sub_module_name);
-        return true;
-    }
-
-    node = loader_malloc(sizeof(WASMRegisteredModule), NULL, 0);
-    if (!node) {
-        return false;
-    }
-
-    node->module_name = sub_module_name;
-    node->module = (WASMModuleCommon *)sub_module;
-    ret = bh_list_insert(parent_module->import_module_list, node);
-    bh_assert(BH_LIST_SUCCESS == ret);
-    (void)ret;
-    return true;
-}
-
-static WASMModule *
-load_depended_module(const WASMModule *parent_module,
-                     const char *sub_module_name, char *error_buf,
-                     uint32 error_buf_size)
-{
-    WASMModule *sub_module = NULL;
-    bool ret = false;
-    uint8 *buffer = NULL;
-    uint32 buffer_size = 0;
-    const module_reader reader = wasm_runtime_get_module_reader();
-    const module_destroyer destroyer = wasm_runtime_get_module_destroyer();
-
-    /* check the registered module list of the parent */
-    sub_module = search_sub_module(parent_module, sub_module_name);
-    if (sub_module) {
-        LOG_DEBUG("%s has been loaded before", sub_module_name);
-        return sub_module;
-    }
-
-    /* check the global registered module list */
-    sub_module =
-        (WASMModule *)wasm_runtime_find_module_registered(sub_module_name);
-    if (sub_module) {
-        LOG_DEBUG("%s has been loaded", sub_module_name);
-        goto register_sub_module;
-    }
-
-    LOG_VERBOSE("loading %s", sub_module_name);
-
-    if (!reader) {
-        set_error_buf_v(error_buf, error_buf_size,
-                        "no sub module reader to load %s", sub_module_name);
-        return NULL;
-    }
-
-    /* start to maintain a loading module list */
-    ret = wasm_runtime_is_loading_module(sub_module_name);
-    if (ret) {
-        set_error_buf_v(error_buf, error_buf_size,
-                        "found circular dependency on %s", sub_module_name);
-        return NULL;
-    }
-
-    ret = wasm_runtime_add_loading_module(sub_module_name, error_buf,
-                                          error_buf_size);
-    if (!ret) {
-        LOG_DEBUG("can not add %s into loading module list\n", sub_module_name);
-        return NULL;
-    }
-
-    ret = reader(sub_module_name, &buffer, &buffer_size);
-    if (!ret) {
-        LOG_DEBUG("read the file of %s failed", sub_module_name);
-        set_error_buf_v(error_buf, error_buf_size, "unknown import",
-                        sub_module_name);
-        goto delete_loading_module;
-    }
-
-    sub_module =
-        wasm_loader_load(buffer, buffer_size, false, error_buf, error_buf_size);
-    if (!sub_module) {
-        LOG_DEBUG("error: can not load the sub_module %s", sub_module_name);
-        /* others will be destroyed in runtime_destroy() */
-        goto destroy_file_buffer;
-    }
-
-    wasm_runtime_delete_loading_module(sub_module_name);
-
-    /* register on a global list */
-    ret = wasm_runtime_register_module_internal(
-        sub_module_name, (WASMModuleCommon *)sub_module, buffer, buffer_size,
-        error_buf, error_buf_size);
-    if (!ret) {
-        LOG_DEBUG("error: can not register module %s globally\n",
-                  sub_module_name);
-        /* others will be unloaded in runtime_destroy() */
-        goto unload_module;
-    }
-
-    /* register into its parent list */
-register_sub_module:
-    ret = register_sub_module(parent_module, sub_module_name, sub_module);
-    if (!ret) {
-        set_error_buf_v(error_buf, error_buf_size,
-                        "failed to register sub module %s", sub_module_name);
-        /* since it is in the global module list, no need to
-         * unload the module. the runtime_destroy() will do it
-         */
-        return NULL;
-    }
-
-    return sub_module;
-
-unload_module:
-    wasm_loader_unload(sub_module);
-
-destroy_file_buffer:
-    if (destroyer) {
-        destroyer(buffer, buffer_size);
-    }
-    else {
-        LOG_WARNING("need to release the reading buffer of %s manually",
-                    sub_module_name);
-    }
-
-delete_loading_module:
-    wasm_runtime_delete_loading_module(sub_module_name);
-    return NULL;
-}
 #endif /* end of WASM_ENABLE_MULTI_MODULE */
 
 static bool
@@ -1104,8 +934,9 @@ load_function_import(const uint8 **p_buf, const uint8 *buf_end,
 #if WASM_ENABLE_MULTI_MODULE != 0
     else {
         if (!wasm_runtime_is_built_in_module(sub_module_name)) {
-            sub_module = load_depended_module(parent_module, sub_module_name,
-                                              error_buf, error_buf_size);
+            sub_module = (WASMModule *)wasm_runtime_load_depended_module(
+                (WASMModuleCommon *)parent_module, sub_module_name, error_buf,
+                error_buf_size);
             if (!sub_module) {
                 return false;
             }
@@ -1193,8 +1024,9 @@ load_table_import(const uint8 **p_buf, const uint8 *buf_end,
 
 #if WASM_ENABLE_MULTI_MODULE != 0
     if (!wasm_runtime_is_built_in_module(sub_module_name)) {
-        sub_module = load_depended_module(parent_module, sub_module_name,
-                                          error_buf, error_buf_size);
+        sub_module = (WASMModule *)wasm_runtime_load_depended_module(
+            (WASMModuleCommon *)parent_module, sub_module_name, error_buf,
+            error_buf_size);
         if (!sub_module) {
             return false;
         }
@@ -1327,8 +1159,9 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
 
 #if WASM_ENABLE_MULTI_MODULE != 0
     if (!wasm_runtime_is_built_in_module(sub_module_name)) {
-        sub_module = load_depended_module(parent_module, sub_module_name,
-                                          error_buf, error_buf_size);
+        sub_module = (WASMModule *)wasm_runtime_load_depended_module(
+            (WASMModuleCommon *)parent_module, sub_module_name, error_buf,
+            error_buf_size);
         if (!sub_module) {
             return false;
         }
@@ -1427,8 +1260,9 @@ load_global_import(const uint8 **p_buf, const uint8 *buf_end,
 #if WASM_ENABLE_MULTI_MODULE != 0
     if (!global->is_linked
         && !wasm_runtime_is_built_in_module(sub_module_name)) {
-        sub_module = load_depended_module(parent_module, sub_module_name,
-                                          error_buf, error_buf_size);
+        sub_module = (WASMModule *)wasm_runtime_load_depended_module(
+            (WASMModuleCommon *)parent_module, sub_module_name, error_buf,
+            error_buf_size);
         if (!sub_module) {
             return false;
         }
@@ -1541,7 +1375,15 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         return false;
     }
     if (memory->flags > 1) {
-        set_error_buf(error_buf, error_buf_size, "integer too large");
+        if (memory->flags & 2) {
+            set_error_buf(error_buf, error_buf_size,
+                          "shared memory flag was found, "
+                          "please enable shared memory, lib-pthread "
+                          "or lib-wasi-threads");
+        }
+        else {
+            set_error_buf(error_buf, error_buf_size, "invalid memory flags");
+        }
         return false;
     }
 #else
@@ -5476,6 +5318,7 @@ wasm_loader_pop_frame_ref(WASMLoaderContext *ctx, uint8 type, char *error_buf,
     return true;
 }
 
+#if WASM_ENABLE_FAST_INTERP == 0
 static bool
 wasm_loader_push_pop_frame_ref(WASMLoaderContext *ctx, uint8 pop_cnt,
                                uint8 type_push, uint8 type_pop, char *error_buf,
@@ -5490,6 +5333,7 @@ wasm_loader_push_pop_frame_ref(WASMLoaderContext *ctx, uint8 pop_cnt,
         return false;
     return true;
 }
+#endif
 
 static bool
 wasm_loader_push_frame_csp(WASMLoaderContext *ctx, uint8 label_type,
@@ -5553,21 +5397,27 @@ fail:
         LOG_OP("\ndelete last op\n");                           \
     } while (0)
 #else /* else of WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS */
+#if UINTPTR_MAX == UINT64_MAX
 #define emit_label(opcode)                                                     \
     do {                                                                       \
         int32 offset =                                                         \
             (int32)((uint8 *)handle_table[opcode] - (uint8 *)handle_table[0]); \
-        if (!(offset >= INT16_MIN && offset < INT16_MAX)) {                    \
-            set_error_buf(error_buf, error_buf_size,                           \
-                          "pre-compiled label offset out of range");           \
-            goto fail;                                                         \
-        }                                                                      \
-        wasm_loader_emit_int16(loader_ctx, offset);                            \
+        /* emit int32 relative offset in 64-bit target */                      \
+        wasm_loader_emit_uint32(loader_ctx, offset);                           \
         LOG_OP("\nemit_op [%02x]\t", opcode);                                  \
     } while (0)
+#else
+#define emit_label(opcode)                                           \
+    do {                                                             \
+        uint32 label_addr = (uint32)(uintptr_t)handle_table[opcode]; \
+        /* emit uint32 label address in 32-bit target */             \
+        wasm_loader_emit_uint32(loader_ctx, label_addr);             \
+        LOG_OP("\nemit_op [%02x]\t", opcode);                        \
+    } while (0)
+#endif
 #define skip_label()                                           \
     do {                                                       \
-        wasm_loader_emit_backspace(loader_ctx, sizeof(int16)); \
+        wasm_loader_emit_backspace(loader_ctx, sizeof(int32)); \
         LOG_OP("\ndelete last op\n");                          \
     } while (0)
 #endif /* end of WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS */
@@ -5897,12 +5747,6 @@ preserve_referenced_local(WASMLoaderContext *loader_ctx, uint8 opcode,
     (void)error_buf;
     (void)error_buf_size;
     return true;
-#if WASM_ENABLE_LABELS_AS_VALUES != 0
-#if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
-fail:
-    return false;
-#endif
-#endif
 }
 
 static bool
@@ -6167,27 +6011,6 @@ wasm_loader_pop_frame_offset(WASMLoaderContext *ctx, uint8 type,
 }
 
 static bool
-wasm_loader_push_pop_frame_offset(WASMLoaderContext *ctx, uint8 pop_cnt,
-                                  uint8 type_push, uint8 type_pop,
-                                  bool disable_emit, int16 operand_offset,
-                                  char *error_buf, uint32 error_buf_size)
-{
-    uint8 i;
-
-    for (i = 0; i < pop_cnt; i++) {
-        if (!wasm_loader_pop_frame_offset(ctx, type_pop, error_buf,
-                                          error_buf_size))
-            return false;
-    }
-    if (!wasm_loader_push_frame_offset(ctx, type_push, disable_emit,
-                                       operand_offset, error_buf,
-                                       error_buf_size))
-        return false;
-
-    return true;
-}
-
-static bool
 wasm_loader_push_frame_ref_offset(WASMLoaderContext *ctx, uint8 type,
                                   bool disable_emit, int16 operand_offset,
                                   char *error_buf, uint32 error_buf_size)
@@ -6220,12 +6043,24 @@ wasm_loader_push_pop_frame_ref_offset(WASMLoaderContext *ctx, uint8 pop_cnt,
                                       bool disable_emit, int16 operand_offset,
                                       char *error_buf, uint32 error_buf_size)
 {
-    if (!wasm_loader_push_pop_frame_offset(ctx, pop_cnt, type_push, type_pop,
-                                           disable_emit, operand_offset,
-                                           error_buf, error_buf_size))
+    uint8 i;
+
+    for (i = 0; i < pop_cnt; i++) {
+        if (!wasm_loader_pop_frame_offset(ctx, type_pop, error_buf,
+                                          error_buf_size))
+            return false;
+
+        if (!wasm_loader_pop_frame_ref(ctx, type_pop, error_buf,
+                                       error_buf_size))
+            return false;
+    }
+
+    if (!wasm_loader_push_frame_offset(ctx, type_push, disable_emit,
+                                       operand_offset, error_buf,
+                                       error_buf_size))
         return false;
-    if (!wasm_loader_push_pop_frame_ref(ctx, pop_cnt, type_push, type_pop,
-                                        error_buf, error_buf_size))
+
+    if (!wasm_loader_push_frame_ref(ctx, type_push, error_buf, error_buf_size))
         return false;
 
     return true;
@@ -7014,6 +6849,7 @@ static bool
 copy_params_to_dynamic_space(WASMLoaderContext *loader_ctx, bool is_if_block,
                              char *error_buf, uint32 error_buf_size)
 {
+    bool ret = false;
     int16 *frame_offset = NULL;
     uint8 *cells = NULL, cell;
     int16 *src_offsets = NULL;
@@ -7084,13 +6920,13 @@ copy_params_to_dynamic_space(WASMLoaderContext *loader_ctx, bool is_if_block,
     if (is_if_block)
         PUSH_OFFSET_TYPE(VALUE_TYPE_I32);
 
+    ret = true;
+
+fail:
     /* Free the emit data */
     wasm_runtime_free(emit_data);
 
-    return true;
-
-fail:
-    return false;
+    return ret;
 }
 #endif
 
@@ -7965,6 +7801,9 @@ re_scan:
                 uint8 ref_type;
                 BranchBlock *cur_block = loader_ctx->frame_csp - 1;
                 int32 available_stack_cell;
+#if WASM_ENABLE_FAST_INTERP != 0
+                uint8 *p_code_compiled_tmp = loader_ctx->p_code_compiled;
+#endif
 
                 POP_I32();
 
@@ -7993,26 +7832,26 @@ re_scan:
 #if WASM_ENABLE_FAST_INTERP != 0
                             if (loader_ctx->p_code_compiled) {
                                 uint8 opcode_tmp = WASM_OP_SELECT_64;
-                                uint8 *p_code_compiled_tmp =
-                                    loader_ctx->p_code_compiled - 2;
 #if WASM_ENABLE_LABELS_AS_VALUES != 0
 #if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0
                                 *(void **)(p_code_compiled_tmp
                                            - sizeof(void *)) =
                                     handle_table[opcode_tmp];
 #else
+#if UINTPTR_MAX == UINT64_MAX
+                                /* emit int32 relative offset in 64-bit target
+                                 */
                                 int32 offset =
                                     (int32)((uint8 *)handle_table[opcode_tmp]
                                             - (uint8 *)handle_table[0]);
-                                if (!(offset >= INT16_MIN
-                                      && offset < INT16_MAX)) {
-                                    set_error_buf(error_buf, error_buf_size,
-                                                  "pre-compiled label offset "
-                                                  "out of range");
-                                    goto fail;
-                                }
-                                *(int16 *)(p_code_compiled_tmp
-                                           - sizeof(int16)) = (int16)offset;
+                                *(int32 *)(p_code_compiled_tmp
+                                           - sizeof(int32)) = offset;
+#else
+                                /* emit uint32 label address in 32-bit target */
+                                *(uint32 *)(p_code_compiled_tmp
+                                            - sizeof(uint32)) =
+                                    (uint32)(uintptr_t)handle_table[opcode_tmp];
+#endif
 #endif /* end of WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS */
 #else  /* else of WASM_ENABLE_LABELS_AS_VALUES */
 #if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0
@@ -8063,9 +7902,13 @@ re_scan:
             case WASM_OP_SELECT_T:
             {
                 uint8 vec_len, ref_type;
+#if WASM_ENABLE_FAST_INTERP != 0
+                uint8 *p_code_compiled_tmp = loader_ctx->p_code_compiled;
+#endif
 
                 read_leb_uint32(p, p_end, vec_len);
-                if (!vec_len) {
+                if (vec_len != 1) {
+                    /* typed select must have exactly one result */
                     set_error_buf(error_buf, error_buf_size,
                                   "invalid result arity");
                     goto fail;
@@ -8084,8 +7927,6 @@ re_scan:
 #if WASM_ENABLE_FAST_INTERP != 0
                 if (loader_ctx->p_code_compiled) {
                     uint8 opcode_tmp = WASM_OP_SELECT;
-                    uint8 *p_code_compiled_tmp =
-                        loader_ctx->p_code_compiled - 2;
 
                     if (ref_type == VALUE_TYPE_V128) {
 #if (WASM_ENABLE_SIMD == 0) \
@@ -8104,16 +7945,17 @@ re_scan:
                         *(void **)(p_code_compiled_tmp - sizeof(void *)) =
                             handle_table[opcode_tmp];
 #else
+#if UINTPTR_MAX == UINT64_MAX
+                        /* emit int32 relative offset in 64-bit target */
                         int32 offset = (int32)((uint8 *)handle_table[opcode_tmp]
                                                - (uint8 *)handle_table[0]);
-                        if (!(offset >= INT16_MIN && offset < INT16_MAX)) {
-                            set_error_buf(
-                                error_buf, error_buf_size,
-                                "pre-compiled label offset out of range");
-                            goto fail;
-                        }
-                        *(int16 *)(p_code_compiled_tmp - sizeof(int16)) =
-                            (int16)offset;
+                        *(int32 *)(p_code_compiled_tmp - sizeof(int32)) =
+                            offset;
+#else
+                        /* emit uint32 label address in 32-bit target */
+                        *(uint32 *)(p_code_compiled_tmp - sizeof(uint32)) =
+                            (uint32)(uintptr_t)handle_table[opcode_tmp];
+#endif
 #endif /* end of WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS */
 #else  /* else of WASM_ENABLE_LABELS_AS_VALUES */
 #if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0

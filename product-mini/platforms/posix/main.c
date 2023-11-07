@@ -75,6 +75,9 @@ print_help()
     printf("  --dir=<dir>              Grant wasi access to the given host directories\n");
     printf("                           to the program, for example:\n");
     printf("                             --dir=<dir1> --dir=<dir2>\n");
+    printf("  --map-dir=<guest::host>  Grant wasi access to the given host directories\n");
+    printf("                           to the program at a specific guest path, for example:\n");
+    printf("                             --map-dir=<guest-path1::host-path1> --map-dir=<guest-path2::host-path2>\n");
     printf("  --addr-pool=<addrs>      Grant wasi access to the given network addresses in\n");
     printf("                           CIRD notation to the program, seperated with ',',\n");
     printf("                           for example:\n");
@@ -97,6 +100,11 @@ print_help()
 #if WASM_ENABLE_LIB_PTHREAD != 0 || WASM_ENABLE_LIB_WASI_THREADS != 0
     printf("  --max-threads=n          Set maximum thread number per cluster, default is 4\n");
 #endif
+#if WASM_ENABLE_THREAD_MGR != 0
+    printf("  --timeout=ms             Set the maximum execution time in ms.\n");
+    printf("                           If it expires, the runtime aborts the execution\n");
+    printf("                           with a trap.\n");
+#endif
 #if WASM_ENABLE_DEBUG_INTERP != 0
     printf("  -g=ip:port               Set the debug sever address, default is debug disabled\n");
     printf("                             if port is 0, then a random port will be used\n");
@@ -115,8 +123,7 @@ app_instance_main(wasm_module_inst_t module_inst)
     const char *exception;
 
     wasm_application_execute_main(module_inst, app_argc, app_argv);
-    if ((exception = wasm_runtime_get_exception(module_inst)))
-        printf("%s\n", exception);
+    exception = wasm_runtime_get_exception(module_inst);
     return exception;
 }
 
@@ -282,93 +289,124 @@ validate_env_str(char *env)
 #endif
 
 #if BH_HAS_DLFCN
-typedef uint32 (*get_native_lib_func)(char **p_module_name,
-                                      NativeSymbol **p_native_symbols);
+struct native_lib {
+    void *handle;
+
+    uint32 (*get_native_lib)(char **p_module_name,
+                             NativeSymbol **p_native_symbols);
+    int (*init_native_lib)(void);
+    void (*deinit_native_lib)(void);
+
+    char *module_name;
+    NativeSymbol *native_symbols;
+    uint32 n_native_symbols;
+};
+
+struct native_lib *
+load_native_lib(const char *name)
+{
+    struct native_lib *lib = wasm_runtime_malloc(sizeof(*lib));
+    if (lib == NULL) {
+        LOG_WARNING("warning: failed to load native library %s because of "
+                    "allocation failure",
+                    name);
+        goto fail;
+    }
+    memset(lib, 0, sizeof(*lib));
+
+    /* open the native library */
+    if (!(lib->handle = dlopen(name, RTLD_NOW | RTLD_GLOBAL))
+        && !(lib->handle = dlopen(name, RTLD_LAZY))) {
+        LOG_WARNING("warning: failed to load native library %s", name);
+        goto fail;
+    }
+
+    lib->init_native_lib = dlsym(lib->handle, "init_native_lib");
+    lib->get_native_lib = dlsym(lib->handle, "get_native_lib");
+    lib->deinit_native_lib = dlsym(lib->handle, "deinit_native_lib");
+
+    if (!lib->get_native_lib) {
+        LOG_WARNING("warning: failed to lookup `get_native_lib` function "
+                    "from native lib %s",
+                    name);
+        goto fail;
+    }
+
+    if (lib->init_native_lib) {
+        int ret = lib->init_native_lib();
+        if (ret != 0) {
+            LOG_WARNING("warning: `init_native_lib` function from native "
+                        "lib %s failed with %d",
+                        name, ret);
+            goto fail;
+        }
+    }
+
+    lib->n_native_symbols =
+        lib->get_native_lib(&lib->module_name, &lib->native_symbols);
+
+    /* register native symbols */
+    if (!(lib->n_native_symbols > 0 && lib->module_name && lib->native_symbols
+          && wasm_runtime_register_natives(
+              lib->module_name, lib->native_symbols, lib->n_native_symbols))) {
+        LOG_WARNING("warning: failed to register native lib %s", name);
+        if (lib->deinit_native_lib) {
+            lib->deinit_native_lib();
+        }
+        goto fail;
+    }
+    return lib;
+fail:
+    if (lib != NULL) {
+        if (lib->handle != NULL) {
+            dlclose(lib->handle);
+        }
+        wasm_runtime_free(lib);
+    }
+    return NULL;
+}
 
 static uint32
 load_and_register_native_libs(const char **native_lib_list,
                               uint32 native_lib_count,
-                              void **native_handle_list)
+                              struct native_lib **native_lib_loaded_list)
 {
-    uint32 i, native_handle_count = 0, n_native_symbols;
-    NativeSymbol *native_symbols;
-    char *module_name;
-    void *handle;
+    uint32 i, native_lib_loaded_count = 0;
 
     for (i = 0; i < native_lib_count; i++) {
-        /* open the native library */
-        if (!(handle = dlopen(native_lib_list[i], RTLD_NOW | RTLD_GLOBAL))
-            && !(handle = dlopen(native_lib_list[i], RTLD_LAZY))) {
-            LOG_WARNING("warning: failed to load native library %s",
-                        native_lib_list[i]);
+        struct native_lib *lib = load_native_lib(native_lib_list[i]);
+        if (lib == NULL) {
             continue;
         }
-
-        /* lookup get_native_lib func */
-        get_native_lib_func get_native_lib = dlsym(handle, "get_native_lib");
-        if (!get_native_lib) {
-            LOG_WARNING("warning: failed to lookup `get_native_lib` function "
-                        "from native lib %s",
-                        native_lib_list[i]);
-            dlclose(handle);
-            continue;
-        }
-
-        n_native_symbols = get_native_lib(&module_name, &native_symbols);
-
-        /* register native symbols */
-        if (!(n_native_symbols > 0 && module_name && native_symbols
-              && wasm_runtime_register_natives(module_name, native_symbols,
-                                               n_native_symbols))) {
-            LOG_WARNING("warning: failed to register native lib %s",
-                        native_lib_list[i]);
-            dlclose(handle);
-            continue;
-        }
-
-        native_handle_list[native_handle_count++] = handle;
+        native_lib_loaded_list[native_lib_loaded_count++] = lib;
     }
 
-    return native_handle_count;
+    return native_lib_loaded_count;
 }
 
 static void
 unregister_and_unload_native_libs(uint32 native_lib_count,
-                                  void **native_handle_list)
+                                  struct native_lib **native_lib_loaded_list)
 {
-    uint32 i, n_native_symbols;
-    NativeSymbol *native_symbols;
-    char *module_name;
-    void *handle;
+    uint32 i;
 
     for (i = 0; i < native_lib_count; i++) {
-        handle = native_handle_list[i];
-
-        /* lookup get_native_lib func */
-        get_native_lib_func get_native_lib = dlsym(handle, "get_native_lib");
-        if (!get_native_lib) {
-            LOG_WARNING("warning: failed to lookup `get_native_lib` function "
-                        "from native lib %p",
-                        handle);
-            continue;
-        }
-
-        n_native_symbols = get_native_lib(&module_name, &native_symbols);
-        if (n_native_symbols == 0 || module_name == NULL
-            || native_symbols == NULL) {
-            LOG_WARNING("warning: get_native_lib returned different values for "
-                        "native lib %p",
-                        handle);
-            continue;
-        }
+        struct native_lib *lib = native_lib_loaded_list[i];
 
         /* unregister native symbols */
-        if (!wasm_runtime_unregister_natives(module_name, native_symbols)) {
-            LOG_WARNING("warning: failed to unregister native lib %p", handle);
+        if (!wasm_runtime_unregister_natives(lib->module_name,
+                                             lib->native_symbols)) {
+            LOG_WARNING("warning: failed to unregister native lib %p",
+                        lib->handle);
             continue;
         }
 
-        dlclose(handle);
+        if (lib->deinit_native_lib) {
+            lib->deinit_native_lib();
+        }
+
+        dlclose(lib->handle);
+        wasm_runtime_free(lib);
     }
 }
 #endif /* BH_HAS_DLFCN */
@@ -384,19 +422,28 @@ handle_module_path(const char *module_path)
 static char *module_search_path = ".";
 
 static bool
-module_reader_callback(const char *module_name, uint8 **p_buffer,
-                       uint32 *p_size)
+module_reader_callback(package_type_t module_type, const char *module_name,
+                       uint8 **p_buffer, uint32 *p_size)
 {
-    const char *format = "%s/%s.wasm";
+    char *file_format = NULL;
+#if WASM_ENABLE_INTERP != 0
+    if (module_type == Wasm_Module_Bytecode)
+        file_format = ".wasm";
+#endif
+#if WASM_ENABLE_AOT != 0
+    if (module_type == Wasm_Module_AoT)
+        file_format = ".aot";
+#endif
+    bh_assert(file_format);
+    const char *format = "%s/%s%s";
     int sz = strlen(module_search_path) + strlen("/") + strlen(module_name)
-             + strlen(".wasm") + 1;
-    char *wasm_file_name = BH_MALLOC(sz);
+             + strlen(file_format) + 1;
+    char *wasm_file_name = wasm_runtime_malloc(sz);
     if (!wasm_file_name) {
         return false;
     }
-
-    snprintf(wasm_file_name, sz, format, module_search_path, module_name);
-
+    snprintf(wasm_file_name, sz, format, module_search_path, module_name,
+             file_format);
     *p_buffer = (uint8_t *)bh_read_file_to_buffer(wasm_file_name, p_size);
 
     wasm_runtime_free(wasm_file_name);
@@ -417,6 +464,108 @@ moudle_destroyer(uint8 *buffer, uint32 size)
 
 #if WASM_ENABLE_GLOBAL_HEAP_POOL != 0
 static char global_heap_buf[WASM_GLOBAL_HEAP_SIZE] = { 0 };
+#else
+static void *
+malloc_func(
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    void *user_data,
+#endif
+    unsigned int size)
+{
+    return malloc(size);
+}
+
+static void *
+realloc_func(
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    void *user_data,
+#endif
+    void *ptr, unsigned int size)
+{
+    return realloc(ptr, size);
+}
+
+static void
+free_func(
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    void *user_data,
+#endif
+    void *ptr)
+{
+    free(ptr);
+}
+#endif /* end of WASM_ENABLE_GLOBAL_HEAP_POOL */
+
+#if WASM_ENABLE_STATIC_PGO != 0
+static void
+dump_pgo_prof_data(wasm_module_inst_t module_inst, const char *path)
+{
+    char *buf;
+    uint32 len;
+    FILE *file;
+
+    if (!(len = wasm_runtime_get_pgo_prof_data_size(module_inst))) {
+        printf("failed to get LLVM PGO profile data size\n");
+        return;
+    }
+
+    if (!(buf = wasm_runtime_malloc(len))) {
+        printf("allocate memory failed\n");
+        return;
+    }
+
+    if (len != wasm_runtime_dump_pgo_prof_data_to_buf(module_inst, buf, len)) {
+        printf("failed to dump LLVM PGO profile data\n");
+        wasm_runtime_free(buf);
+        return;
+    }
+
+    if (!(file = fopen(path, "wb"))) {
+        printf("failed to create file %s", path);
+        wasm_runtime_free(buf);
+        return;
+    }
+    fwrite(buf, len, 1, file);
+    fclose(file);
+
+    wasm_runtime_free(buf);
+
+    printf("LLVM raw profile file %s was generated.\n", path);
+}
+#endif
+
+#if WASM_ENABLE_THREAD_MGR != 0
+struct timeout_arg {
+    uint32 timeout_ms;
+    wasm_module_inst_t inst;
+#if defined(BH_HAS_STD_ATOMIC)
+    _Atomic
+#endif
+        bool cancel;
+};
+
+void *
+timeout_thread(void *vp)
+{
+    const struct timeout_arg *arg = vp;
+    uint32 left = arg->timeout_ms;
+    while (!arg->cancel) {
+        uint32 ms;
+        if (left >= 100) {
+            ms = 100;
+        }
+        else {
+            ms = left;
+        }
+        os_usleep((uint64)ms * 1000);
+        left -= ms;
+        if (left == 0) {
+            wasm_runtime_terminate(arg->inst);
+            break;
+        }
+    }
+    return NULL;
+}
 #endif
 
 #if WASM_ENABLE_STATIC_PGO != 0
@@ -495,6 +644,8 @@ main(int argc, char *argv[])
 #if WASM_ENABLE_LIBC_WASI != 0
     const char *dir_list[8] = { NULL };
     uint32 dir_list_size = 0;
+    const char *map_dir_list[8] = { NULL };
+    uint32 map_dir_list_size = 0;
     const char *env_list[8] = { NULL };
     uint32 env_list_size = 0;
     const char *addr_pool[8] = { NULL };
@@ -505,8 +656,8 @@ main(int argc, char *argv[])
 #if BH_HAS_DLFCN
     const char *native_lib_list[8] = { NULL };
     uint32 native_lib_count = 0;
-    void *native_handle_list[8] = { NULL };
-    uint32 native_handle_count = 0;
+    struct native_lib *native_lib_loaded_list[8];
+    uint32 native_lib_loaded_count = 0;
 #endif
 #if WASM_ENABLE_DEBUG_INTERP != 0
     char *ip_addr = NULL;
@@ -514,6 +665,9 @@ main(int argc, char *argv[])
 #endif
 #if WASM_ENABLE_STATIC_PGO != 0
     const char *gen_prof_file = NULL;
+#endif
+#if WASM_ENABLE_THREAD_MGR != 0
+    int timeout_ms = -1;
 #endif
 
     /* Process options. */
@@ -630,6 +784,16 @@ main(int argc, char *argv[])
             }
             dir_list[dir_list_size++] = argv[0] + 6;
         }
+        else if (!strncmp(argv[0], "--map-dir=", 10)) {
+            if (argv[0][10] == '\0')
+                return print_help();
+            if (map_dir_list_size >= sizeof(map_dir_list) / sizeof(char *)) {
+                printf("Only allow max map dir number %d\n",
+                       (int)(sizeof(map_dir_list) / sizeof(char *)));
+                return 1;
+            }
+            map_dir_list[map_dir_list_size++] = argv[0] + 10;
+        }
         else if (!strncmp(argv[0], "--env=", 6)) {
             char *tmp_env;
 
@@ -711,6 +875,13 @@ main(int argc, char *argv[])
             wasm_runtime_set_max_thread_num(atoi(argv[0] + 14));
         }
 #endif
+#if WASM_ENABLE_THREAD_MGR != 0
+        else if (!strncmp(argv[0], "--timeout=", 10)) {
+            if (argv[0][10] == '\0')
+                return print_help();
+            timeout_ms = atoi(argv[0] + 10);
+        }
+#endif
 #if WASM_ENABLE_DEBUG_INTERP != 0
         else if (!strncmp(argv[0], "-g=", 3)) {
             char *port_str = strchr(argv[0] + 3, ':');
@@ -758,9 +929,13 @@ main(int argc, char *argv[])
     init_args.mem_alloc_option.pool.heap_size = sizeof(global_heap_buf);
 #else
     init_args.mem_alloc_type = Alloc_With_Allocator;
-    init_args.mem_alloc_option.allocator.malloc_func = malloc;
-    init_args.mem_alloc_option.allocator.realloc_func = realloc;
-    init_args.mem_alloc_option.allocator.free_func = free;
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    /* Set user data for the allocator is needed */
+    /* init_args.mem_alloc_option.allocator.user_data = user_data; */
+#endif
+    init_args.mem_alloc_option.allocator.malloc_func = malloc_func;
+    init_args.mem_alloc_option.allocator.realloc_func = realloc_func;
+    init_args.mem_alloc_option.allocator.free_func = free_func;
 #endif
 
 #if WASM_ENABLE_FAST_JIT != 0
@@ -790,8 +965,8 @@ main(int argc, char *argv[])
 #endif
 
 #if BH_HAS_DLFCN
-    native_handle_count = load_and_register_native_libs(
-        native_lib_list, native_lib_count, native_handle_list);
+    native_lib_loaded_count = load_and_register_native_libs(
+        native_lib_list, native_lib_count, native_lib_loaded_list);
 #endif
 
     /* load WASM byte buffer from WASM bin file */
@@ -832,8 +1007,9 @@ main(int argc, char *argv[])
     }
 
 #if WASM_ENABLE_LIBC_WASI != 0
-    wasm_runtime_set_wasi_args(wasm_module, dir_list, dir_list_size, NULL, 0,
-                               env_list, env_list_size, argv, argc);
+    wasm_runtime_set_wasi_args(wasm_module, dir_list, dir_list_size,
+                               map_dir_list, map_dir_list_size, env_list,
+                               env_list_size, argv, argc);
 
     wasm_runtime_set_wasi_addr_pool(wasm_module, addr_pool, addr_pool_size);
     wasm_runtime_set_wasi_ns_lookup_pool(wasm_module, ns_lookup_pool,
@@ -871,18 +1047,37 @@ main(int argc, char *argv[])
     }
 #endif
 
+#if WASM_ENABLE_THREAD_MGR != 0
+    struct timeout_arg timeout_arg;
+    korp_tid timeout_tid;
+    if (timeout_ms >= 0) {
+        timeout_arg.timeout_ms = timeout_ms;
+        timeout_arg.inst = wasm_module_inst;
+        timeout_arg.cancel = false;
+        ret = os_thread_create(&timeout_tid, timeout_thread, &timeout_arg,
+                               APP_THREAD_STACK_SIZE_DEFAULT);
+        if (ret != 0) {
+            printf("Failed to start timeout\n");
+            goto fail5;
+        }
+    }
+#endif
+
     ret = 0;
+    const char *exception = NULL;
     if (is_repl_mode) {
         app_instance_repl(wasm_module_inst);
     }
     else if (func_name) {
-        if (app_instance_func(wasm_module_inst, func_name)) {
+        exception = app_instance_func(wasm_module_inst, func_name);
+        if (exception) {
             /* got an exception */
             ret = 1;
         }
     }
     else {
-        if (app_instance_main(wasm_module_inst)) {
+        exception = app_instance_main(wasm_module_inst);
+        if (exception) {
             /* got an exception */
             ret = 1;
         }
@@ -899,12 +1094,25 @@ main(int argc, char *argv[])
     }
 #endif
 
+    if (exception)
+        printf("%s\n", exception);
+
 #if WASM_ENABLE_STATIC_PGO != 0 && WASM_ENABLE_AOT != 0
     if (get_package_type(wasm_file_buf, wasm_file_size) == Wasm_Module_AoT
         && gen_prof_file)
         dump_pgo_prof_data(wasm_module_inst, gen_prof_file);
 #endif
 
+#if WASM_ENABLE_THREAD_MGR != 0
+    if (timeout_ms >= 0) {
+        timeout_arg.cancel = true;
+        os_thread_join(timeout_tid, NULL);
+    }
+#endif
+
+#if WASM_ENABLE_THREAD_MGR != 0
+fail5:
+#endif
 #if WASM_ENABLE_DEBUG_INTERP != 0
 fail4:
 #endif
@@ -925,7 +1133,8 @@ fail2:
 fail1:
 #if BH_HAS_DLFCN
     /* unload the native libraries */
-    unregister_and_unload_native_libs(native_handle_count, native_handle_list);
+    unregister_and_unload_native_libs(native_lib_loaded_count,
+                                      native_lib_loaded_list);
 #endif
 
     /* destroy runtime environment */

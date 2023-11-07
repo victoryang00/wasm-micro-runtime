@@ -4,6 +4,7 @@
  */
 
 #include "aot_emit_memory.h"
+#include "aot_compiler.h"
 #include "aot_emit_exception.h"
 #include "../aot/aot_runtime.h"
 #include "aot_intrinsic.h"
@@ -145,11 +146,7 @@ aot_check_memory_overflow(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
      * have been thrown when converting float to integer before
      */
     /* return addres directly if constant offset and inside memory space */
-    if (LLVMIsConstant(addr) && !LLVMIsUndef(addr)
-#if LLVM_VERSION_NUMBER >= 12
-        && !LLVMIsPoison(addr)
-#endif
-    ) {
+    if (LLVMIsEfficientConstInt(addr)) {
         uint64 mem_offset =
             (uint64)LLVMConstIntGetZExtValue(addr) + (uint64)offset;
         uint32 num_bytes_per_page =
@@ -160,7 +157,10 @@ aot_check_memory_overflow(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
         if (mem_offset + bytes <= mem_data_size) {
             /* inside memory space */
-            offset1 = I32_CONST((uint32)mem_offset);
+            if (comp_ctx->pointer_size == sizeof(uint64))
+                offset1 = I64_CONST((uint32)mem_offset);
+            else
+                offset1 = I32_CONST((uint32)mem_offset);
             CHECK_LLVM_CONST(offset1);
             if (!enable_segue) {
                 if (!(maddr = LLVMBuildInBoundsGEP2(comp_ctx->builder,
@@ -911,11 +911,7 @@ check_bulk_memory_overflow(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
      * have been thrown when converting float to integer before
      */
     /* return addres directly if constant offset and inside memory space */
-    if (!LLVMIsUndef(offset) && !LLVMIsUndef(bytes)
-#if LLVM_VERSION_NUMBER >= 12
-        && !LLVMIsPoison(offset) && !LLVMIsPoison(bytes)
-#endif
-        && LLVMIsConstant(offset) && LLVMIsConstant(bytes)) {
+    if (LLVMIsEfficientConstInt(offset) && LLVMIsEfficientConstInt(bytes)) {
         uint64 mem_offset = (uint64)LLVMConstIntGetZExtValue(offset);
         uint64 mem_len = (uint64)LLVMConstIntGetZExtValue(bytes);
         uint32 num_bytes_per_page =

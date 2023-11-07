@@ -77,8 +77,7 @@ app_instance_main(wasm_module_inst_t module_inst)
     const char *exception;
 
     wasm_application_execute_main(module_inst, app_argc, app_argv);
-    if ((exception = wasm_runtime_get_exception(module_inst)))
-        printf("%s\n", exception);
+    exception = wasm_runtime_get_exception(module_inst);
     return exception;
 }
 
@@ -192,7 +191,37 @@ validate_env_str(char *env)
 
 #if WASM_ENABLE_GLOBAL_HEAP_POOL != 0
 static char global_heap_buf[WASM_GLOBAL_HEAP_SIZE] = { 0 };
+#else
+static void *
+malloc_func(
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    void *user_data,
 #endif
+    unsigned int size)
+{
+    return malloc(size);
+}
+
+static void *
+realloc_func(
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    void *user_data,
+#endif
+    void *ptr, unsigned int size)
+{
+    return realloc(ptr, size);
+}
+
+static void
+free_func(
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    void *user_data,
+#endif
+    void *ptr)
+{
+    free(ptr);
+}
+#endif /* end of WASM_ENABLE_GLOBAL_HEAP_POOL */
 
 #if WASM_ENABLE_MULTI_MODULE != 0
 static char *
@@ -204,20 +233,29 @@ handle_module_path(const char *module_path)
 
 static char *module_search_path = ".";
 static bool
-module_reader_callback(const char *module_name, uint8 **p_buffer,
-                       uint32 *p_size)
+module_reader_callback(package_type_t module_type, const char *module_name,
+                       uint8 **p_buffer, uint32 *p_size)
 {
-    const char *format = "%s/%s.wasm";
-    uint32 sz = (uint32)(strlen(module_search_path) + strlen("/")
-                         + strlen(module_name) + strlen(".wasm") + 1);
-    char *wasm_file_name = BH_MALLOC(sz);
+    char *file_format = NULL;
+#if WASM_ENABLE_INTERP != 0
+    if (module_type == Wasm_Module_Bytecode)
+        file_format = ".wasm";
+#endif
+#if WASM_ENABLE_AOT != 0
+    if (module_type == Wasm_Module_AoT)
+        file_format = ".aot";
+#endif
+    bh_assert(file_format);
+    const char *format = "%s/%s%s";
+    int sz = strlen(module_search_path) + strlen("/") + strlen(module_name)
+             + strlen(file_format) + 1;
+    char *wasm_file_name = wasm_runtime_malloc(sz);
     if (!wasm_file_name) {
         return false;
     }
-
-    snprintf(wasm_file_name, sz, format, module_search_path, module_name);
-
-    *p_buffer = (uint8 *)bh_read_file_to_buffer(wasm_file_name, p_size);
+    snprintf(wasm_file_name, sz, format, module_search_path, module_name,
+             file_format);
+    *p_buffer = (uint8_t *)bh_read_file_to_buffer(wasm_file_name, p_size);
 
     wasm_runtime_free(wasm_file_name);
     return *p_buffer != NULL;
@@ -442,9 +480,13 @@ main(int argc, char *argv[])
     init_args.mem_alloc_option.pool.heap_size = sizeof(global_heap_buf);
 #else
     init_args.mem_alloc_type = Alloc_With_Allocator;
-    init_args.mem_alloc_option.allocator.malloc_func = malloc;
-    init_args.mem_alloc_option.allocator.realloc_func = realloc;
-    init_args.mem_alloc_option.allocator.free_func = free;
+#if WASM_MEM_ALLOC_WITH_USER_DATA != 0
+    /* Set user data for the allocator is needed */
+    /* init_args.mem_alloc_option.allocator.user_data = user_data; */
+#endif
+    init_args.mem_alloc_option.allocator.malloc_func = malloc_func;
+    init_args.mem_alloc_option.allocator.realloc_func = realloc_func;
+    init_args.mem_alloc_option.allocator.free_func = free_func;
 #endif
 
 #if WASM_ENABLE_JIT != 0
@@ -536,17 +578,20 @@ main(int argc, char *argv[])
 #endif
 
     ret = 0;
+    const char *exception = NULL;
     if (is_repl_mode) {
         app_instance_repl(wasm_module_inst);
     }
     else if (func_name) {
-        if (app_instance_func(wasm_module_inst, func_name)) {
+        exception = app_instance_func(wasm_module_inst, func_name);
+        if (exception) {
             /* got an exception */
             ret = 1;
         }
     }
     else {
-        if (app_instance_main(wasm_module_inst)) {
+        exception = app_instance_main(wasm_module_inst);
+        if (exception) {
             /* got an exception */
             ret = 1;
         }
@@ -562,6 +607,9 @@ main(int argc, char *argv[])
         }
     }
 #endif
+
+    if (exception)
+        printf("%s\n", exception);
 
 #if WASM_ENABLE_DEBUG_INTERP != 0
 fail4:

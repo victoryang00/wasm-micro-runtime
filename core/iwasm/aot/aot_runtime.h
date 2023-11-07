@@ -89,36 +89,12 @@ typedef struct AOTFunctionInstance {
 
 typedef struct AOTModuleInstanceExtra {
     DefPointer(const uint32 *, stack_sizes);
-    CApiFuncImport *c_api_func_imports;
-#if WASM_CONFIGUABLE_BOUNDS_CHECKS != 0
-    /* Disable bounds checks or not */
-    bool disable_bounds_checks;
+    WASMModuleInstanceExtraCommon common;
+#if WASM_ENABLE_MULTI_MODULE != 0
+    bh_list sub_module_inst_list_head;
+    bh_list *sub_module_inst_list;
 #endif
 } AOTModuleInstanceExtra;
-
-#if defined(OS_ENABLE_HW_BOUND_CHECK) && defined(BH_PLATFORM_WINDOWS)
-/* clang-format off */
-typedef struct AOTUnwindInfo {
-    uint8 Version       : 3;
-    uint8 Flags         : 5;
-    uint8 SizeOfProlog;
-    uint8 CountOfCodes;
-    uint8 FrameRegister : 4;
-    uint8 FrameOffset   : 4;
-    struct {
-        struct {
-            uint8 CodeOffset;
-            uint8 UnwindOp : 4;
-            uint8 OpInfo   : 4;
-        };
-        uint16 FrameOffset;
-    } UnwindCode[1];
-} AOTUnwindInfo;
-/* clang-format on */
-
-/* size of mov instruction and jmp instruction */
-#define PLT_ITEM_SIZE 12
-#endif
 
 #if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
 typedef struct GOTItem {
@@ -221,14 +197,6 @@ typedef struct AOTModule {
     uint32 float_plt_count;
 #endif
 
-#if defined(OS_ENABLE_HW_BOUND_CHECK) && defined(BH_PLATFORM_WINDOWS)
-    /* dynamic function table to be added by RtlAddFunctionTable(),
-       used to unwind the call stack and register exception handler
-       for AOT functions */
-    RUNTIME_FUNCTION *rtl_func_table;
-    bool rtl_func_table_registered;
-#endif
-
 #if defined(BUILD_TARGET_X86_64) || defined(BUILD_TARGET_AMD_64)
     uint32 got_item_count;
     GOTItemList got_item_list;
@@ -271,6 +239,12 @@ typedef struct AOTModule {
     WASIArguments wasi_args;
     bool import_wasi_api;
 #endif
+
+#if WASM_ENABLE_MULTI_MODULE != 0
+    /* TODO: add mutex for mutli-thread? */
+    bh_list import_module_list_head;
+    bh_list *import_module_list;
+#endif
 #if WASM_ENABLE_DEBUG_AOT != 0
     void *elf_hdr;
     uint32 elf_size;
@@ -288,6 +262,10 @@ typedef struct AOTModule {
 #define AOTMemoryInstance WASMMemoryInstance
 #define AOTTableInstance WASMTableInstance
 #define AOTModuleInstance WASMModuleInstance
+
+#if WASM_ENABLE_MULTI_MODULE != 0
+#define AOTSubModInstNode WASMSubModInstNode
+#endif
 
 /* Target info, read from ELF header of object file */
 typedef struct AOTTargetInfo {
@@ -430,7 +408,7 @@ aot_unload(AOTModule *module);
  * Instantiate a AOT module.
  *
  * @param module the AOT module to instantiate
- * @param is_sub_inst the flag of sub instance
+ * @param parent the parent module instance
  * @param heap_size the default heap size of the module instance, a heap will
  *        be created besides the app memory space. Both wasm app and native
  *        function can allocate memory from the heap. If heap_size is 0, the
@@ -441,9 +419,9 @@ aot_unload(AOTModule *module);
  * @return return the instantiated AOT module instance, NULL if failed
  */
 AOTModuleInstance *
-aot_instantiate(AOTModule *module, bool is_sub_inst, WASMExecEnv *exec_env_main,
-                uint32 stack_size, uint32 heap_size, char *error_buf,
-                uint32 error_buf_size);
+aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
+                WASMExecEnv *exec_env_main, uint32 stack_size, uint32 heap_size,
+                char *error_buf, uint32 error_buf_size);
 
 /**
  * Deinstantiate a AOT module instance, destroy the resources.

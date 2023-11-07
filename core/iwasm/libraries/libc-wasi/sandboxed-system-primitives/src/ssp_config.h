@@ -14,8 +14,8 @@
 #ifndef SSP_CONFIG_H
 #define SSP_CONFIG_H
 
+#include "bh_platform.h"
 #include "gnuc.h"
-#include <stdlib.h>
 
 #if defined(__FreeBSD__) || defined(__APPLE__) \
     || (defined(ANDROID) && __ANDROID_API__ < 28)
@@ -26,8 +26,8 @@
 
 // On Linux, prefer to use getrandom, though it isn't available in
 // GLIBC before 2.25.
-#if (defined(__linux__) || defined(ESP_PLATFORM)) \
-    && (!defined(__GLIBC__) || __GLIBC__ > 2      \
+#if (defined(__linux__) || defined(ESP_PLATFORM) || defined(__COSMOPOLITAN__)) \
+    && (!defined(__GLIBC__) || __GLIBC__ > 2                                   \
         || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 25))
 #define CONFIG_HAS_GETRANDOM 1
 #else
@@ -65,7 +65,7 @@
 #endif
 #endif
 
-#if !defined(__APPLE__) && !defined(ESP_PLATFORM)
+#if !defined(__APPLE__) && !defined(ESP_PLATFORM) && !defined(__COSMOPOLITAN__)
 #define CONFIG_HAS_POSIX_FALLOCATE 1
 #else
 #define CONFIG_HAS_POSIX_FALLOCATE 0
@@ -83,7 +83,8 @@
 #define CONFIG_HAS_PTHREAD_COND_TIMEDWAIT_RELATIVE_NP 0
 #endif
 
-#if !defined(__APPLE__) && !defined(BH_PLATFORM_LINUX_SGX)
+#if !defined(__APPLE__) && !defined(BH_PLATFORM_LINUX_SGX) \
+    && !defined(__COSMOPOLITAN__)
 #define CONFIG_HAS_PTHREAD_CONDATTR_SETCLOCK 1
 #else
 #define CONFIG_HAS_PTHREAD_CONDATTR_SETCLOCK 0
@@ -101,10 +102,18 @@
 #define st_mtim st_mtimespec
 #endif
 
-#ifdef __APPLE__
-#define CONFIG_TLS_USE_GSBASE 1
-#else
-#define CONFIG_TLS_USE_GSBASE 0
+#if defined(O_DSYNC)
+#define CONFIG_HAS_O_DSYNC
+#endif
+
+// POSIX requires O_RSYNC to be defined, but Linux explicitly doesn't support
+// it.
+#if defined(O_RSYNC) && !defined(__linux__)
+#define CONFIG_HAS_O_RSYNC
+#endif
+
+#if defined(O_SYNC)
+#define CONFIG_HAS_O_SYNC
 #endif
 
 #if !defined(BH_PLATFORM_LINUX_SGX)

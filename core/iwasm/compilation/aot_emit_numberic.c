@@ -54,13 +54,13 @@
     } while (0)
 
 #if LLVM_VERSION_NUMBER >= 12
-#define IS_CONST_ZERO(val)                                          \
-    (!LLVMIsUndef(val) && !LLVMIsPoison(val) && LLVMIsConstant(val) \
-     && ((is_i32 && (int32)LLVMConstIntGetZExtValue(val) == 0)      \
+#define IS_CONST_ZERO(val)                                     \
+    (LLVMIsEfficientConstInt(val)                              \
+     && ((is_i32 && (int32)LLVMConstIntGetZExtValue(val) == 0) \
          || (!is_i32 && (int64)LLVMConstIntGetSExtValue(val) == 0)))
 #else
 #define IS_CONST_ZERO(val)                                     \
-    (!LLVMIsUndef(val) && LLVMIsConstant(val)                  \
+    (LLVMIsEfficientConstInt(val)                              \
      && ((is_i32 && (int32)LLVMConstIntGetZExtValue(val) == 0) \
          || (!is_i32 && (int64)LLVMConstIntGetSExtValue(val) == 0)))
 #endif
@@ -473,7 +473,7 @@ compile_int_div(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         return aot_handle_next_reachable_block(comp_ctx, func_ctx, p_frame_ip);
     }
 
-    if (LLVMIsConstant(right)) {
+    if (LLVMIsEfficientConstInt(right)) {
         int64 right_val = (int64)LLVMConstIntGetSExtValue(right);
         switch (right_val) {
             case 0:
@@ -728,9 +728,7 @@ compile_int_shl(AOTCompContext *comp_ctx, LLVMValueRef left, LLVMValueRef right,
 {
     LLVMValueRef res;
 
-    if (strcmp(comp_ctx->target_arch, "x86_64") != 0
-        && strcmp(comp_ctx->target_arch, "i386") != 0)
-        SHIFT_COUNT_MASK;
+    SHIFT_COUNT_MASK;
 
     /* Build shl */
     LLVM_BUILD_OP(Shl, left, right, res, "shl", NULL);
@@ -744,9 +742,7 @@ compile_int_shr_s(AOTCompContext *comp_ctx, LLVMValueRef left,
 {
     LLVMValueRef res;
 
-    if (strcmp(comp_ctx->target_arch, "x86_64") != 0
-        && strcmp(comp_ctx->target_arch, "i386") != 0)
-        SHIFT_COUNT_MASK;
+    SHIFT_COUNT_MASK;
 
     /* Build shl */
     LLVM_BUILD_OP(AShr, left, right, res, "shr_s", NULL);
@@ -760,9 +756,7 @@ compile_int_shr_u(AOTCompContext *comp_ctx, LLVMValueRef left,
 {
     LLVMValueRef res;
 
-    if (strcmp(comp_ctx->target_arch, "x86_64") != 0
-        && strcmp(comp_ctx->target_arch, "i386") != 0)
-        SHIFT_COUNT_MASK;
+    SHIFT_COUNT_MASK;
 
     /* Build shl */
     LLVM_BUILD_OP(LShr, left, right, res, "shr_u", NULL);
@@ -783,17 +777,25 @@ compile_int_rot(AOTCompContext *comp_ctx, LLVMValueRef left, LLVMValueRef right,
     if (IS_CONST_ZERO(right))
         return left;
 
-    /* Calculate (bits - shif_count) */
+    /* Calculate (bits - shift_count) */
     LLVM_BUILD_OP(Sub, is_i32 ? I32_32 : I64_64, right, bits_minus_shift_count,
                   "bits_minus_shift_count", NULL);
+    /* Calculate (bits - shift_count) & mask */
+    bits_minus_shift_count =
+        LLVMBuildAnd(comp_ctx->builder, bits_minus_shift_count,
+                     is_i32 ? I32_31 : I64_63, "bits_minus_shift_count_and");
+    if (!bits_minus_shift_count) {
+        aot_set_last_error("llvm build and failed.");
+        return NULL;
+    }
 
     if (is_rotl) {
-        /* left<<count | left>>(BITS-count) */
+        /* (left << count) | (left >> ((BITS - count) & mask)) */
         LLVM_BUILD_OP(Shl, left, right, tmp_l, "tmp_l", NULL);
         LLVM_BUILD_OP(LShr, left, bits_minus_shift_count, tmp_r, "tmp_r", NULL);
     }
     else {
-        /* left>>count | left<<(BITS-count) */
+        /* (left >> count) | (left << ((BITS - count) & mask)) */
         LLVM_BUILD_OP(LShr, left, right, tmp_l, "tmp_l", NULL);
         LLVM_BUILD_OP(Shl, left, bits_minus_shift_count, tmp_r, "tmp_r", NULL);
     }
