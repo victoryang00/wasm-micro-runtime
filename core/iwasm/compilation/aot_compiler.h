@@ -138,6 +138,9 @@ offset_of_local(AOTCompContext *comp_ctx, unsigned n)
 bool
 aot_gen_commit_values(AOTCompFrame *frame);
 
+bool
+aot_gen_restore_values(AOTCompFrame *frame);
+
 /**
  * Generate instructions to commit SP and IP pointers to the frame.
  *

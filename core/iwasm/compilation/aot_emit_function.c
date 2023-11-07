@@ -527,6 +527,8 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
             return false;
         if (!aot_gen_commit_values(comp_ctx->aot_frame))
             return false;
+        if (!aot_gen_restore_values(comp_ctx->aot_frame))
+            return false;
     }
 
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -1088,10 +1090,14 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     char buf[32];
     bool ret = false;
 
-    if (comp_ctx->aot_frame && !aot_gen_commit_values(comp_ctx->aot_frame)
-        && !aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                                 *p_frame_ip)) {
-        return false;
+    if (comp_ctx->aot_frame) {
+        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
+                                  *p_frame_ip))
+            return false;
+        if (!aot_gen_commit_values(comp_ctx->aot_frame))
+            return false;
+        if (!aot_gen_restore_values(comp_ctx->aot_frame))
+            return false;
     }
 
     /* Check function type index */
