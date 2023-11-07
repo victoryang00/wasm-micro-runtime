@@ -516,7 +516,6 @@ pthread_start_routine(void *arg)
                                     argv)) {
         /* Exception has already been spread during throwing */
     }
-
     /* destroy pthread key values */
     call_key_destructor(exec_env);
 
@@ -544,7 +543,7 @@ pthread_start_routine(void *arg)
     return (void *)(uintptr_t)argv[0];
 }
 
-static int
+int
 pthread_create_wrapper(wasm_exec_env_t exec_env,
                        uint32 *thread,    /* thread_handle */
                        const void *attr,  /* not supported */

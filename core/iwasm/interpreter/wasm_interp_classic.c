@@ -21,6 +21,7 @@
 #include "../fast-jit/jit_compiler.h"
 #endif
 
+uint64_t counter_ = 0;
 typedef int32 CellType_I32;
 typedef int64 CellType_I64;
 typedef float32 CellType_F32;
@@ -475,11 +476,13 @@ read_leb(const uint8 *buf, uint32 *p_offset, uint32 maxbits, bool sign)
 #define GET_OPCODE() (void)0
 #endif
 
-#define DEF_OP_I_CONST(ctype, src_op_type)              \
-    do {                                                \
-        ctype cval;                                     \
-        read_leb_##ctype(frame_ip, frame_ip_end, cval); \
-        PUSH_##src_op_type(cval);                       \
+#define DEF_OP_I_CONST(ctype, src_op_type)                              \
+    do {                                                                \
+        ctype cval;                                                     \
+        read_leb_##ctype(frame_ip, frame_ip_end, cval);                 \
+        PUSH_##src_op_type(cval);                                       \
+        LOG_DEBUG("i32.const %d %d %ld", cval, *frame_sp,               \
+                  ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom); \
     } while (0)
 
 #define DEF_OP_EQZ(src_op_type)             \
@@ -1116,7 +1119,31 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
         goto *handle_table[*frame_ip++];                                  \
     } while (0)
 #else
-#define HANDLE_OP_END() FETCH_OPCODE_AND_DISPATCH()
+#define HANDLE_OP_END()                                                 \
+    do {                                                                \
+        SYNC_ALL_TO_FRAME();                                            \
+        if (!exec_env->is_restore) {                                    \
+            if (!exec_env->is_checkpoint && counter_ < SNAPSHOT_STEP) { \
+                counter_++;                                             \
+                FETCH_OPCODE_AND_DISPATCH();                            \
+            }                                                           \
+            else {                                                      \
+                LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);             \
+                counter_++;                                             \
+                SERIALIZE_CURSTATE(file1);                              \
+                if (counter_ > SNAPSHOT_STEP + SNAPSHOT_DEBUG_STEP) {   \
+                    serialize_to_file(exec_env);                        \
+                }                                                       \
+                FETCH_OPCODE_AND_DISPATCH();                            \
+            }                                                           \
+        }                                                               \
+        else {                                                          \
+            LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);                 \
+            counter_++;                                                 \
+            SERIALIZE_CURSTATE(file2);                                  \
+            FETCH_OPCODE_AND_DISPATCH();                                \
+        }                                                               \
+    } while (0)
 #endif
 
 #else /* else of WASM_ENABLE_LABELS_AS_VALUES */
@@ -1132,6 +1159,28 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     }                                                              \
     os_mutex_unlock(&exec_env->wait_lock);                         \
     continue
+#else
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#define HANDLE_OP_END()                                             \
+    SYNC_ALL_TO_FRAME();                                            \
+    if (!exec_env->is_restore) {                                    \
+        if (!exec_env->is_checkpoint && counter_ < SNAPSHOT_STEP) { \
+            counter_++;                                             \
+            continue;                                               \
+        }                                                           \
+        else {                                                      \
+            LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);             \
+            counter_++;                                             \
+            if (counter_ > SNAPSHOT_STEP + SNAPSHOT_DEBUG_STEP) {   \
+                serialize_to_file(exec_env);                        \
+            }                                                       \
+        }                                                           \
+    }                                                               \
+    else {                                                          \
+        LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);                 \
+        counter_++;                                                 \
+        continue;                                                   \
+    }
 #else
 #define HANDLE_OP_END() continue
 #endif
@@ -1186,7 +1235,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint32 cache_index, type_index, param_cell_num, cell_num;
     uint8 value_type;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (exec_env->is_restore){
+    if (exec_env->is_restore) {
+        // WASMFunction *cur_wasm_func = cur_func->u.func;
+        // file2=fopen("trace-compare1.txt","w");
         frame = exec_env->cur_frame;
         UPDATE_ALL_FROM_FRAME();
         frame_ip_end = wasm_get_func_code_end(cur_func);
@@ -1232,7 +1283,10 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 goto got_exception;
             }
 
-            HANDLE_OP(WASM_OP_NOP) { HANDLE_OP_END(); }
+            HANDLE_OP(WASM_OP_NOP)
+            {
+                HANDLE_OP_END();
+            }
 
             HANDLE_OP(EXT_OP_BLOCK)
             {
@@ -1354,6 +1408,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             HANDLE_OP(WASM_OP_END)
             {
                 if (frame_csp > frame->csp_bottom + 1) {
+                    LOG_DEBUG("csp %p csp_bottom %p", frame_csp,
+                              frame->csp_bottom);
                     POP_CSP();
                 }
                 else { /* end of function, treat as WASM_OP_RETURN */
@@ -1714,6 +1770,11 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         GET_I64_FROM_ADDR(frame_lp + (local_offset & 0x7F)));
                 else
                     PUSH_I32(*(int32 *)(frame_lp + local_offset));
+                LOG_DEBUG("local.get %d %d %ld %d %ld", local_offset, *frame_lp,
+                          ((uint8 *)frame_lp) - exec_env->wasm_stack.s.bottom,
+                          *frame_sp,
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+
                 HANDLE_OP_END();
             }
 
@@ -1752,6 +1813,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         POP_I64());
                 else
                     *(int32 *)(frame_lp + local_offset) = POP_I32();
+                LOG_DEBUG("local.set %d %d %ld", local_offset, *frame_sp,
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+
                 HANDLE_OP_END();
             }
 
@@ -1822,6 +1886,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 global = globals + global_idx;
                 global_addr = get_global_addr(global_data, global);
                 *(int32 *)global_addr = POP_I32();
+                LOG_DEBUG("set.global %ld %d %d %p",
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom,
+                          *frame_sp, global_idx, global_addr);
                 HANDLE_OP_END();
             }
 
@@ -1862,6 +1929,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 bh_assert(global_idx < module->e->global_count);
                 global = globals + global_idx;
                 global_addr = get_global_addr(global_data, global);
+                LOG_DEBUG("set.global %d %d %ld", global_idx, *frame_sp,
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
                 PUT_I64_TO_ADDR((uint32 *)global_addr, POP_I64());
                 HANDLE_OP_END();
             }
@@ -1875,6 +1944,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 read_leb_uint32(frame_ip, frame_ip_end, flags);
                 read_leb_uint32(frame_ip, frame_ip_end, offset);
                 addr = POP_I32();
+                LOG_DEBUG("load.i32 %d %d %d %ld", offset, flags, *frame_sp,
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
                 CHECK_MEMORY_OVERFLOW(4);
                 PUSH_I32(LOAD_I32(maddr));
                 CHECK_READ_WATCHPOINT(addr, offset);
@@ -2421,6 +2492,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             HANDLE_OP(WASM_OP_I32_ADD)
             {
                 DEF_OP_NUMERIC(uint32, uint32, I32, +);
+                LOG_DEBUG("i32.add %d %ld", *frame_sp,
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
                 HANDLE_OP_END();
             }
 
@@ -3070,7 +3143,10 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             HANDLE_OP(WASM_OP_I32_REINTERPRET_F32)
             HANDLE_OP(WASM_OP_I64_REINTERPRET_F64)
             HANDLE_OP(WASM_OP_F32_REINTERPRET_I32)
-            HANDLE_OP(WASM_OP_F64_REINTERPRET_I64) { HANDLE_OP_END(); }
+            HANDLE_OP(WASM_OP_F64_REINTERPRET_I64)
+            {
+                HANDLE_OP_END();
+            }
 
             HANDLE_OP(WASM_OP_I32_EXTEND8_S)
             {
@@ -3953,7 +4029,11 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 (WASMBranchBlock *)frame->sp_boundary;
             frame->csp_boundary =
                 frame->csp_bottom + cur_wasm_func->max_block_num;
-
+#if WASM_ENABLE_CUSTOM_NAME_SECTION != 0
+            if (frame->function->u.func->field_name)
+                LOG_FATAL("csp_bottom %p for function %s", frame->csp_bottom,
+                          frame->function->u.func->field_name);
+#endif
             /* Initialize the local variables */
             memset(frame_lp + cur_func->param_cell_num, 0,
                    (uint32)(cur_func->local_cell_num * 4));
@@ -3978,6 +4058,12 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
         if (!prev_frame->ip)
             /* Called from native. */
             return;
+
+        LOG_FATAL("return_func: %s %p",
+                  prev_frame->function->u.func->field_name, prev_frame);
+        if (!strcmp(prev_frame->function->u.func->field_name, "fwrite")) {
+            counter_ = INT_MAX;
+        }
 
         RECOVER_CONTEXT(prev_frame);
         HANDLE_OP_END();

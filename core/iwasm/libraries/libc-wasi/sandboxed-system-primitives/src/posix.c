@@ -1659,6 +1659,9 @@ path_get(struct fd_table *curfds, struct path_access *pa, __wasi_fd_t fd,
                 error = __WASI_ENOTCAPABLE;
                 goto fail;
             }
+#if WASM_BUILD_CHECKPOINT_RESTORE != 0
+            remove_fd(curfd - 1);
+#endif
             close(fds[curfd--]);
         }
         else if (curpath > 0 || *paths[curpath] != '\0'
@@ -3501,7 +3504,8 @@ argv_environ_init(struct argv_environ_values *argv_environ, char *argv_buf,
 
 void
 argv_environ_destroy(struct argv_environ_values *argv_environ)
-{}
+{
+}
 
 void
 fd_table_destroy(struct fd_table *ft)
