@@ -223,40 +223,90 @@ aot_gen_commit_values(AOTCompFrame *frame)
     AOTFuncContext *func_ctx = frame->func_ctx;
     AOTValueSlot *p;
     LLVMValueRef value;
-    uint32 n;
+    LLVMTypeRef llvm_value_type;
+    uint32 n, local_idx;
 
-    for (p = frame->lp; p < frame->sp; p++) {
-        if (!p->dirty)
-            continue;
+    for (p = frame->lp, local_idx = 0; p < frame->sp; p++, local_idx++) {
+        // TODO: dirty flag has some unknown issue, disable it for now
+        // hope backend can optimize it
+        // if (!p->dirty) {
+        //     switch (p->type) {
+        //         case VALUE_TYPE_I32:
+        //         case VALUE_TYPE_FUNCREF:
+        //         case VALUE_TYPE_EXTERNREF:
+        //         case VALUE_TYPE_F32:
+        //         case VALUE_TYPE_I1:
+        //             break;
+        //         case VALUE_TYPE_I64:
+        //         case VALUE_TYPE_F64:
+        //             p++;
+        //             break;
+        //         case VALUE_TYPE_V128:
+        //             p += 3;
+        //             break;
+        //         default:
+        //             bh_assert(0);
+        //             break;
+        //     }
+        //     continue;
+        // }
 
         p->dirty = 0;
         n = p - frame->lp;
+
+        llvm_value_type = TO_LLVM_TYPE(p->type);
+        if (llvm_value_type == NULL) {
+            fprintf(stderr, "gen value %d type error\n", p->type);
+            fprintf(stderr, "local_idx %d n %d\n", local_idx, n);
+            return false;
+        }
+        if (local_idx < func_ctx->aot_func->func_type->param_count
+                            + func_ctx->aot_func->local_count) {
+            // fprintf(stderr, "LLVMBuildLoad2 %d < %d\n", local_idx,
+            //         func_ctx->aot_func->local_count);
+            value = LLVMBuildLoad2(comp_ctx->builder, llvm_value_type,
+                                   func_ctx->locals[local_idx],
+                                   "commit_stack_load");
+            // fprintf(stderr, "DONE LLVMBuildLoad2 %d\n", local_idx);
+        }
+        else {
+            if (!p->value) {
+                fprintf(stderr, "value is null, %d %d\n", local_idx, n);
+                exit(-1);
+            }
+            value = LLVMBuildLoad2(comp_ctx->builder, llvm_value_type, p->value,
+                                   "commit_stack_load");
+        }
+        if (value == NULL) {
+            fprintf(stderr, "gen value load error\n");
+            return false;
+        }
 
         switch (p->type) {
             case VALUE_TYPE_I32:
             case VALUE_TYPE_FUNCREF:
             case VALUE_TYPE_EXTERNREF:
-                if (!store_value(comp_ctx, p->value, VALUE_TYPE_I32,
+                if (!store_value(comp_ctx, value, VALUE_TYPE_I32,
                                  func_ctx->cur_frame,
                                  offset_of_local(comp_ctx, n)))
                     return false;
                 break;
             case VALUE_TYPE_I64:
                 (++p)->dirty = 0;
-                if (!store_value(comp_ctx, p->value, VALUE_TYPE_I64,
+                if (!store_value(comp_ctx, value, VALUE_TYPE_I64,
                                  func_ctx->cur_frame,
                                  offset_of_local(comp_ctx, n)))
                     return false;
                 break;
             case VALUE_TYPE_F32:
-                if (!store_value(comp_ctx, p->value, VALUE_TYPE_F32,
+                if (!store_value(comp_ctx, value, VALUE_TYPE_F32,
                                  func_ctx->cur_frame,
                                  offset_of_local(comp_ctx, n)))
                     return false;
                 break;
             case VALUE_TYPE_F64:
                 (++p)->dirty = 0;
-                if (!store_value(comp_ctx, p->value, VALUE_TYPE_F64,
+                if (!store_value(comp_ctx, value, VALUE_TYPE_F64,
                                  func_ctx->cur_frame,
                                  offset_of_local(comp_ctx, n)))
                     return false;
@@ -265,14 +315,14 @@ aot_gen_commit_values(AOTCompFrame *frame)
                 (++p)->dirty = 0;
                 (++p)->dirty = 0;
                 (++p)->dirty = 0;
-                if (!store_value(comp_ctx, p->value, VALUE_TYPE_V128,
+                if (!store_value(comp_ctx, value, VALUE_TYPE_V128,
                                  func_ctx->cur_frame,
                                  offset_of_local(comp_ctx, n)))
                     return false;
                 break;
             case VALUE_TYPE_I1:
-                if (!(value = LLVMBuildZExt(comp_ctx->builder, p->value,
-                                            I32_TYPE, "i32_val"))) {
+                if (!(value = LLVMBuildZExt(comp_ctx->builder, value, I32_TYPE,
+                                            "i32_val"))) {
                     aot_set_last_error("llvm build bit cast failed");
                     return false;
                 }
@@ -291,8 +341,8 @@ aot_gen_commit_values(AOTCompFrame *frame)
 }
 
 static LLVMValueRef
-load_value(AOTCompContext *comp_ctx, LLVMValueRef value, uint8 value_type,
-           LLVMValueRef cur_frame, uint32 offset)
+load_value(AOTCompContext *comp_ctx, uint8 value_type, LLVMValueRef cur_frame,
+           uint32 offset)
 {
     LLVMValueRef value_offset, value_addr, value_ptr = NULL, res;
     LLVMTypeRef value_ptr_type, llvm_value_type;
@@ -356,141 +406,82 @@ aot_gen_restore_values(AOTCompFrame *frame)
     AOTCompContext *comp_ctx = frame->comp_ctx;
     AOTFuncContext *func_ctx = frame->func_ctx;
     AOTValueSlot *p;
-    LLVMValueRef restore_value;
+    LLVMValueRef restore_value, store, value_ptr;
     uint32 n, local_idx = 0;
 
     for (p = frame->lp; p < frame->sp; p++, local_idx++) {
         n = p - frame->lp;
 
+        if (local_idx < func_ctx->aot_func->func_type->param_count
+                            + func_ctx->aot_func->local_count) {
+            value_ptr = func_ctx->locals[local_idx];
+        }
+        else {
+            value_ptr = p->value;
+        }
+        if (!value_ptr) {
+            fprintf(stderr, "restore value is null, %d %d\n", local_idx, n);
+            exit(-1);
+        }
+
         switch (p->type) {
             case VALUE_TYPE_I32:
             case VALUE_TYPE_FUNCREF:
             case VALUE_TYPE_EXTERNREF:
-                if (!(restore_value = load_value(
-                          comp_ctx, p->value, VALUE_TYPE_I32,
-                          func_ctx->cur_frame, offset_of_local(comp_ctx, n))))
+                if (!(restore_value = load_value(comp_ctx, VALUE_TYPE_I32,
+                                                 func_ctx->cur_frame,
+                                                 offset_of_local(comp_ctx, n))))
                     return false;
-                p->value = restore_value;
-                if (p->stack_value) {
-                    p->stack_value->value = restore_value;
-                }
-                else {
-                    PUSH_I32(restore_value);
-                    if (!aot_compile_op_set_local(comp_ctx, func_ctx,
-                                                  local_idx))
-                        return false;
-                    p->dirty = 0;
-                }
                 break;
             case VALUE_TYPE_I64:
                 ++p;
-                if (!(restore_value = load_value(
-                          comp_ctx, p->value, VALUE_TYPE_I64,
-                          func_ctx->cur_frame, offset_of_local(comp_ctx, n))))
+                if (!(restore_value = load_value(comp_ctx, VALUE_TYPE_I64,
+                                                 func_ctx->cur_frame,
+                                                 offset_of_local(comp_ctx, n))))
                     return false;
-                p->value = restore_value;
-                (p - 1)->value = restore_value;
-                if (p->stack_value) {
-                    p->stack_value->value = restore_value;
-                    (p - 1)->stack_value->value = restore_value;
-                }
-                else {
-                    PUSH_I64(restore_value);
-                    if (!aot_compile_op_set_local(comp_ctx, func_ctx,
-                                                  local_idx))
-                        return false;
-                    p->dirty = 0;
-                    (p - 1)->dirty = 0;
-                }
                 break;
             case VALUE_TYPE_F32:
-                if (!(restore_value = load_value(
-                          comp_ctx, p->value, VALUE_TYPE_F32,
-                          func_ctx->cur_frame, offset_of_local(comp_ctx, n))))
+                if (!(restore_value = load_value(comp_ctx, VALUE_TYPE_F32,
+                                                 func_ctx->cur_frame,
+                                                 offset_of_local(comp_ctx, n))))
                     return false;
-                p->value = restore_value;
-                if (p->stack_value) {
-                    p->stack_value->value = restore_value;
-                }
-                else {
-                    PUSH_F32(restore_value);
-                    if (!aot_compile_op_set_local(comp_ctx, func_ctx,
-                                                  local_idx))
-                        return false;
-                    p->dirty = 0;
-                }
                 break;
             case VALUE_TYPE_F64:
                 ++p;
-                if (!(restore_value = load_value(
-                          comp_ctx, p->value, VALUE_TYPE_F64,
-                          func_ctx->cur_frame, offset_of_local(comp_ctx, n))))
+                if (!(restore_value = load_value(comp_ctx, VALUE_TYPE_F64,
+                                                 func_ctx->cur_frame,
+                                                 offset_of_local(comp_ctx, n))))
                     return false;
-                p->value = restore_value;
-                (p - 1)->value = restore_value;
-                if (p->stack_value) {
-                    p->stack_value->value = restore_value;
-                    (p - 1)->stack_value->value = restore_value;
-                }
-                else {
-                    PUSH_F64(restore_value);
-                    if (!aot_compile_op_set_local(comp_ctx, func_ctx,
-                                                  local_idx))
-                        return false;
-                    p->dirty = 0;
-                    (p - 1)->dirty = 0;
-                }
                 break;
             case VALUE_TYPE_V128:
                 ++p;
                 ++p;
                 ++p;
-                if (!(restore_value = load_value(
-                          comp_ctx, p->value, VALUE_TYPE_V128,
-                          func_ctx->cur_frame, offset_of_local(comp_ctx, n))))
+                if (!(restore_value = load_value(comp_ctx, VALUE_TYPE_V128,
+                                                 func_ctx->cur_frame,
+                                                 offset_of_local(comp_ctx, n))))
                     return false;
-                p->value = restore_value;
-                (p - 1)->value = restore_value;
-                (p - 2)->value = restore_value;
-                (p - 3)->value = restore_value;
-                if (p->stack_value) {
-                    p->stack_value->value = restore_value;
-                    (p - 1)->stack_value->value = restore_value;
-                    (p - 2)->stack_value->value = restore_value;
-                    (p - 3)->stack_value->value = restore_value;
-                }
-                else {
-                    PUSH_V128(restore_value);
-                    if (!aot_compile_op_set_local(comp_ctx, func_ctx,
-                                                  local_idx))
-                        return false;
-
-                    p->dirty = 0;
-                    (p - 1)->dirty = 0;
-                    (p - 2)->dirty = 0;
-                    (p - 3)->dirty = 0;
-                }
                 break;
             case VALUE_TYPE_I1:
-                if (!(restore_value = load_value(
-                          comp_ctx, p->value, VALUE_TYPE_I32,
-                          func_ctx->cur_frame, offset_of_local(comp_ctx, n))))
+                if (!(restore_value = load_value(comp_ctx, VALUE_TYPE_I32,
+                                                 func_ctx->cur_frame,
+                                                 offset_of_local(comp_ctx, n))))
                     return false;
                 if (!(restore_value =
                           LLVMBuildTrunc(comp_ctx->builder, restore_value,
                                          INT1_TYPE, "restore_i1_val"))) {
                     aot_set_last_error("llvm build bit cast failed");
                 }
-                if (p->stack_value) {
-                    p->stack_value->value = restore_value;
-                }
-                else {
-                    return false;
-                }
                 break;
             default:
                 bh_assert(0);
                 break;
+        }
+
+        store = LLVMBuildStore(comp_ctx->builder, restore_value, value_ptr);
+        if (!store) {
+            aot_set_last_error("llvm build store failed");
+            return false;
         }
     }
 
@@ -836,6 +827,9 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         func_ctx->restore_switch =
             LLVMBuildSwitch(comp_ctx->builder, value, normal_block, 0);
         LLVMPositionBuilderAtEnd(comp_ctx->builder, normal_block);
+
+        LLVMPositionBuilderBefore(comp_ctx->aot_frame_alloca_builder,
+                                  func_ctx->restore_switch);
     }
 
 #define EMIT_CHECKPOINT()                                                   \

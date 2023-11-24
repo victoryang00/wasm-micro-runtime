@@ -156,17 +156,6 @@ get_target_block(AOTFuncContext *func_ctx, uint32 br_depth)
 }
 
 static void
-clear_frame_locals(AOTCompFrame *aot_frame)
-{
-    uint32 i;
-
-    for (i = 0; i < aot_frame->max_local_cell_num; i++) {
-        aot_frame->lp[i].dirty = 0;
-        aot_frame->lp[i].value = NULL;
-    }
-}
-
-static void
 restore_frame_sp(AOTBlock *block, AOTCompFrame *aot_frame)
 {
     uint32 stack_cell_num;
@@ -203,11 +192,6 @@ handle_next_reachable_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         comp_ctx, func_ctx,
         (*p_frame_ip - 1) - comp_ctx->comp_data->wasm_module->buf_code);
 #endif
-
-    if (aot_frame) {
-        /* Clear frame local variables since they have been committed */
-        clear_frame_locals(aot_frame);
-    }
 
     if (block->label_type == LABEL_TYPE_IF && block->llvm_else_block
         && *p_frame_ip <= block->wasm_code_else) {
@@ -509,12 +493,12 @@ aot_compile_op_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     block->block_index = func_ctx->block_stack.block_index[label_type];
     func_ctx->block_stack.block_index[label_type]++;
 
-    if (comp_ctx->aot_frame) {
-        if (label_type != LABEL_TYPE_BLOCK
-            && !aot_gen_commit_values(comp_ctx->aot_frame)) {
-            goto fail;
-        }
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (label_type != LABEL_TYPE_BLOCK
+    //         && !aot_gen_commit_values(comp_ctx->aot_frame)) {
+    //         goto fail;
+    //     }
+    // }
 
     if (label_type == LABEL_TYPE_BLOCK || label_type == LABEL_TYPE_LOOP) {
         /* Create block */
@@ -682,10 +666,10 @@ aot_compile_op_else(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         ADD_TO_RESULT_PHIS(block, value, result_index);
     }
 
-    if (aot_frame) {
-        bh_assert(block->frame_sp_begin == aot_frame->sp);
-        aot_gen_commit_values(aot_frame);
-    }
+    // if (aot_frame) {
+    //     bh_assert(block->frame_sp_begin == aot_frame->sp);
+    //     aot_gen_commit_values(aot_frame);
+    // }
 
     /* Jump to end block */
     BUILD_BR(block->llvm_end_block);
@@ -697,10 +681,6 @@ aot_compile_op_else(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
         if (comp_ctx->aot_frame) {
             comp_ctx->aot_frame->sp = block->frame_sp_begin;
-            for (i = 0; i < comp_ctx->aot_frame->max_local_cell_num; i++) {
-                comp_ctx->aot_frame->lp[i].dirty = 0;
-                comp_ctx->aot_frame->lp[i].value = NULL;
-            }
         }
 
         for (i = 0; i < block->param_count; i++)
@@ -742,12 +722,12 @@ aot_compile_op_end(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
             MOVE_BLOCK_BEFORE(block->llvm_end_block, next_llvm_end_block);
     }
 
-    if (comp_ctx->aot_frame) {
-        if (block->label_type != LABEL_TYPE_FUNCTION
-            && !aot_gen_commit_values(comp_ctx->aot_frame)) {
-            return false;
-        }
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (block->label_type != LABEL_TYPE_FUNCTION
+    //         && !aot_gen_commit_values(comp_ctx->aot_frame)) {
+    //         return false;
+    //     }
+    // }
 
     /* Handle block result values */
     CREATE_RESULT_VALUE_PHIS(block);
@@ -859,15 +839,15 @@ aot_compile_op_br(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         return false;
     }
 
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-        if (block_dst->label_type == LABEL_TYPE_LOOP) {
-            if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
-                                      comp_ctx->aot_frame->sp, *p_frame_ip))
-                return false;
-        }
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (!aot_gen_commit_values(comp_ctx->aot_frame))
+    //         return false;
+    //     if (block_dst->label_type == LABEL_TYPE_LOOP) {
+    //         if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
+    //                                   comp_ctx->aot_frame->sp, *p_frame_ip))
+    //             return false;
+    //     }
+    // }
 
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Terminate or suspend current thread only when this is a backward jump */
@@ -933,15 +913,15 @@ aot_compile_op_br_if(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         return false;
     }
 
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-        if (block_dst->label_type == LABEL_TYPE_LOOP) {
-            if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
-                                      comp_ctx->aot_frame->sp, *p_frame_ip))
-                return false;
-        }
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (!aot_gen_commit_values(comp_ctx->aot_frame))
+    //         return false;
+    //     if (block_dst->label_type == LABEL_TYPE_LOOP) {
+    //         if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
+    //                                   comp_ctx->aot_frame->sp, *p_frame_ip))
+    //             return false;
+    //     }
+    // }
 
     POP_COND(value_cmp);
 
@@ -1082,13 +1062,14 @@ aot_compile_op_br_table(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     uint64 size;
     char name[32];
 
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                                  *p_frame_ip))
-            return false;
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (!aot_gen_commit_values(comp_ctx->aot_frame))
+    //         return false;
+    //     if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
+    //     comp_ctx->aot_frame->sp,
+    //                               *p_frame_ip))
+    //         return false;
+    // }
 
     POP_I32(value_cmp);
 

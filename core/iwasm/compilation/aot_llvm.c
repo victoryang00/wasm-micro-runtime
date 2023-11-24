@@ -28,6 +28,8 @@ LLVMTypeRef
 wasm_type_to_llvm_type(const AOTLLVMTypes *llvm_types, uint8 wasm_type)
 {
     switch (wasm_type) {
+        case VALUE_TYPE_I1:
+            return llvm_types->int1_type;
         case VALUE_TYPE_I32:
         case VALUE_TYPE_FUNCREF:
         case VALUE_TYPE_EXTERNREF:
@@ -2254,6 +2256,12 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
         goto fail;
     }
 
+    if (!(comp_ctx->aot_frame_alloca_builder =
+              LLVMCreateBuilderInContext(comp_ctx->context))) {
+        aot_set_last_error("create LLVM builder failed.");
+        goto fail;
+    }
+
     /* Create LLVM module for each jit function, note:
        different from non ORC JIT mode, no need to dispose it,
        it will be disposed when the thread safe context is disposed */
@@ -3049,6 +3057,27 @@ void
 aot_value_stack_push(const AOTCompContext *comp_ctx, AOTValueStack *stack,
                      AOTValue *value)
 {
+    LLVMValueRef alloca, store;
+    LLVMTypeRef llvm_value_type;
+
+    llvm_value_type = TO_LLVM_TYPE(value->type);
+    if (llvm_value_type == NULL) {
+        fprintf(stderr, "gen value %d type error\n", value->type);
+        exit(-1);
+    }
+    alloca = LLVMBuildAlloca(comp_ctx->aot_frame_alloca_builder,
+                             llvm_value_type, "wasm_stack_alloca");
+    if (alloca == NULL) {
+        fprintf(stderr, "gen value alloca error\n");
+        exit(-1);
+    }
+    store = LLVMBuildStore(comp_ctx->builder, value->value, alloca);
+    if (store == NULL) {
+        fprintf(stderr, "gen value store error\n");
+        exit(-1);
+    }
+    value->value = alloca;
+
     if (!stack->value_list_head)
         stack->value_list_head = stack->value_list_end = value;
     else {
@@ -3093,6 +3122,21 @@ aot_value_stack_pop(const AOTCompContext *comp_ctx, AOTValueStack *stack)
 
     bh_assert(stack->value_list_end);
 
+    LLVMValueRef llvm_value;
+    LLVMTypeRef llvm_value_type;
+
+    llvm_value_type = TO_LLVM_TYPE(value->type);
+    if (llvm_value_type == NULL) {
+        fprintf(stderr, "gen value %d type error\n", value->type);
+        exit(-1);
+    }
+    llvm_value = LLVMBuildLoad2(comp_ctx->builder, llvm_value_type,
+                                value->value, "wasm_stack_load");
+    if (llvm_value == NULL) {
+        fprintf(stderr, "gen value load error\n");
+        exit(-1);
+    }
+
     if (stack->value_list_head == stack->value_list_end)
         stack->value_list_head = stack->value_list_end = NULL;
     else {
@@ -3132,6 +3176,8 @@ aot_value_stack_pop(const AOTCompContext *comp_ctx, AOTValueStack *stack)
                 break;
         }
     }
+
+    value->value = llvm_value;
 
     return value;
 }

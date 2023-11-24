@@ -93,9 +93,6 @@ typedef struct AOTValueSlot {
     /* The LLVM value of this slot */
     LLVMValueRef value;
 
-    /* The pointer to the stack entry */
-    AOTValue *stack_value;
-
     /* The value type of this slot */
     uint8 type;
 
@@ -484,6 +481,7 @@ typedef struct AOTCompContext {
 
     /* Current frame information for translation */
     AOTCompFrame *aot_frame;
+    LLVMBuilderRef aot_frame_alloca_builder;
 
     /* AOT output file name, to generate {aot_file_name}.o file for analysis */
     const char *aot_file_name;
