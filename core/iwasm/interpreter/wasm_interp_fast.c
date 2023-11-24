@@ -1031,7 +1031,8 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     }
 
     /* - module_inst */
-    exec_env->module_inst = (WASMModuleInstanceCommon *)sub_module_inst;
+    wasm_exec_env_set_module_inst(exec_env,
+                                  (WASMModuleInstanceCommon *)sub_module_inst);
     /* - aux_stack_boundary */
     aux_stack_origin_boundary = exec_env->aux_stack_boundary.boundary;
     exec_env->aux_stack_boundary.boundary =
@@ -1053,15 +1054,8 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     prev_frame->ip = ip;
     exec_env->aux_stack_boundary.boundary = aux_stack_origin_boundary;
     exec_env->aux_stack_bottom.bottom = aux_stack_origin_bottom;
-    exec_env->module_inst = (WASMModuleInstanceCommon *)module_inst;
-
-    /* transfer exception if it is thrown */
-    if (wasm_copy_exception(sub_module_inst, NULL)) {
-        bh_memcpy_s(module_inst->cur_exception,
-                    sizeof(module_inst->cur_exception),
-                    sub_module_inst->cur_exception,
-                    sizeof(sub_module_inst->cur_exception));
-    }
+    wasm_exec_env_restore_module_inst(exec_env,
+                                      (WASMModuleInstanceCommon *)module_inst);
 }
 #endif
 
@@ -1213,7 +1207,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 opcode, local_type, *global_addr;
 #if !defined(OS_ENABLE_HW_BOUND_CHECK) \
     || WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
-#if WASM_CONFIGUABLE_BOUNDS_CHECKS != 0
+#if WASM_CONFIGURABLE_BOUNDS_CHECKS != 0
     bool disable_bounds_checks = !wasm_runtime_is_bounds_checks_enabled(
         (WASMModuleInstanceCommon *)module);
 #else
@@ -2995,8 +2989,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 
                         segment = read_uint32(frame_ip);
 
-                        bytes = (uint64)POP_I32();
-                        offset = (uint64)POP_I32();
+                        bytes = (uint64)(uint32)POP_I32();
+                        offset = (uint64)(uint32)POP_I32();
                         addr = POP_I32();
 
 #if WASM_ENABLE_THREAD_MGR
@@ -3011,10 +3005,18 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                             goto out_of_bounds;
                         maddr = memory->memory_data + (uint32)addr;
 #endif
+                        if (bh_bitmap_get_bit(module->e->common.data_dropped,
+                                              segment)) {
+                            seg_len = 0;
+                            data = NULL;
+                        }
+                        else {
 
-                        seg_len = (uint64)module->module->data_segments[segment]
-                                      ->data_length;
-                        data = module->module->data_segments[segment]->data;
+                            seg_len =
+                                (uint64)module->module->data_segments[segment]
+                                    ->data_length;
+                            data = module->module->data_segments[segment]->data;
+                        }
                         if (offset + bytes > seg_len)
                             goto out_of_bounds;
 
@@ -3027,8 +3029,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         uint32 segment;
 
                         segment = read_uint32(frame_ip);
-
-                        module->module->data_segments[segment]->data_length = 0;
+                        bh_bitmap_set_bit(module->e->common.data_dropped,
+                                          segment);
                         break;
                     }
                     case WASM_OP_MEMORY_COPY:
@@ -3120,8 +3122,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                             break;
                         }
 
-                        if (module->module->table_segments[elem_idx]
-                                .is_dropped) {
+                        if (bh_bitmap_get_bit(module->e->common.elem_dropped,
+                                              elem_idx)) {
                             wasm_set_exception(module,
                                                "out of bounds table access");
                             goto got_exception;
@@ -3150,9 +3152,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     {
                         uint32 elem_idx = read_uint32(frame_ip);
                         bh_assert(elem_idx < module->module->table_seg_count);
-
-                        module->module->table_segments[elem_idx].is_dropped =
-                            true;
+                        bh_bitmap_set_bit(module->e->common.elem_dropped,
+                                          elem_idx);
                         break;
                     }
                     case WASM_OP_TABLE_COPY:
