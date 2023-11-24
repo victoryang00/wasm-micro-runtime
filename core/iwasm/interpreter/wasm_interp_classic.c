@@ -20,6 +20,12 @@
 #if WASM_ENABLE_FAST_JIT != 0
 #include "../fast-jit/jit_compiler.h"
 #endif
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../include/wamr_export.h"
+const char *func_to_stop = NULL;
+int func_to_stop_count = 0;
+int func_count_ = 0;
+#endif
 
 uint64_t counter_ = 0;
 typedef int32 CellType_I32;
@@ -1119,6 +1125,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
         goto *handle_table[*frame_ip++];                                  \
     } while (0)
 #else
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 #define HANDLE_OP_END()                                                 \
     do {                                                                \
         SYNC_ALL_TO_FRAME();                                            \
@@ -1130,7 +1137,30 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
             else {                                                      \
                 LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);             \
                 counter_++;                                             \
-                SERIALIZE_CURSTATE(file1);                              \
+                if (counter_ > SNAPSHOT_STEP + SNAPSHOT_DEBUG_STEP) {   \
+                    serialize_to_file(exec_env);                        \
+                }                                                       \
+                FETCH_OPCODE_AND_DISPATCH();                            \
+            }                                                           \
+        }                                                               \
+        else {                                                          \
+            LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);                 \
+            counter_++;                                                 \
+            FETCH_OPCODE_AND_DISPATCH();                                \
+        }                                                               \
+    } while (0)
+#else
+#define HANDLE_OP_END()                                                 \
+    do {                                                                \
+        SYNC_ALL_TO_FRAME();                                            \
+        if (!exec_env->is_restore) {                                    \
+            if (!exec_env->is_checkpoint && counter_ < SNAPSHOT_STEP) { \
+                counter_++;                                             \   
+                FETCH_OPCODE_AND_DISPATCH();                            \
+            }                                                           \
+            else {                                                      \
+                LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);             \
+                counter_++;                                             \
                 if (counter_ > SNAPSHOT_STEP + SNAPSHOT_DEBUG_STEP) {   \
                     serialize_to_file(exec_env);                        \
                 }                                                       \
@@ -1144,6 +1174,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
             FETCH_OPCODE_AND_DISPATCH();                                \
         }                                                               \
     } while (0)
+#endif  
 #endif
 
 #else /* else of WASM_ENABLE_LABELS_AS_VALUES */
@@ -1185,6 +1216,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
 #define HANDLE_OP_END() continue
 #endif
 
+#endif
 #endif /* end of WASM_ENABLE_LABELS_AS_VALUES */
 
 static inline uint8 *
@@ -1237,7 +1269,6 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->is_restore) {
         // WASMFunction *cur_wasm_func = cur_func->u.func;
-        // file2=fopen("trace-compare1.txt","w");
         frame = exec_env->cur_frame;
         UPDATE_ALL_FROM_FRAME();
         frame_ip_end = wasm_get_func_code_end(cur_func);
@@ -4058,13 +4089,17 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
         if (!prev_frame->ip)
             /* Called from native. */
             return;
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE!=0
         LOG_FATAL("return_func: %s %p",
                   prev_frame->function->u.func->field_name, prev_frame);
-        if (!strcmp(prev_frame->function->u.func->field_name, "fwrite")) {
-            counter_ = INT_MAX;
+        if (func_to_stop && !strcmp(prev_frame->function->u.func->field_name, func_to_stop) ) {
+            if (func_to_stop_count > func_count_) {
+                func_count_++;
+            }else {
+                counter_ = INT_MAX;
+            }
         }
-
+#endif
         RECOVER_CONTEXT(prev_frame);
         HANDLE_OP_END();
     }

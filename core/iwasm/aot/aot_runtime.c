@@ -19,9 +19,7 @@
 #include "wasm_interp.h"
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 #include "wamr_export.h"
-#define SNAPSHOT_STEP 1e9
-#define SNAPSHOT_DEBUG_STEP 0
-int counter_ = 0;
+extern int counter_;
 #endif
 
 /*
