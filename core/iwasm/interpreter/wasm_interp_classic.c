@@ -1150,30 +1150,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
         }                                                               \
     } while (0)
 #else
-#define HANDLE_OP_END()                                                 \
-    do {                                                                \
-        SYNC_ALL_TO_FRAME();                                            \
-        if (!exec_env->is_restore) {                                    \
-            if (!exec_env->is_checkpoint && counter_ < SNAPSHOT_STEP) { \
-                counter_++;                                             \   
-                FETCH_OPCODE_AND_DISPATCH();                            \
-            }                                                           \
-            else {                                                      \
-                LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);             \
-                counter_++;                                             \
-                if (counter_ > SNAPSHOT_STEP + SNAPSHOT_DEBUG_STEP) {   \
-                    serialize_to_file(exec_env);                        \
-                }                                                       \
-                FETCH_OPCODE_AND_DISPATCH();                            \
-            }                                                           \
-        }                                                               \
-        else {                                                          \
-            LOG_DEBUG("[%s:%d]\n", __FILE__, __LINE__);                 \
-            counter_++;                                                 \
-            SERIALIZE_CURSTATE(file2);                                  \
-            FETCH_OPCODE_AND_DISPATCH();                                \
-        }                                                               \
-    } while (0)
+#define HANDLE_OP_END() FETCH_OPCODE_AND_DISPATCH();
 #endif  
 #endif
 
