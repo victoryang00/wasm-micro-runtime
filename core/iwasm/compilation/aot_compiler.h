@@ -8,8 +8,8 @@
 
 #include "aot.h"
 #include "aot_llvm.h"
-#include "../interpreter/wasm_interp.h"
 #include "aot_runtime.h"
+#include "../interpreter/wasm_interp.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,9 +123,25 @@ static inline uint32
 offset_of_local(AOTCompContext *comp_ctx, unsigned n)
 {
     if (!comp_ctx->is_jit_mode)
-        return comp_ctx->pointer_size * 6 + sizeof(uint32) * n;
+        return comp_ctx->pointer_size * 7 + sizeof(uint32) * n;
     else
         return offsetof(AOTFrame, lp) + sizeof(uint32) * n;
+}
+
+/**
+ * Get the offset from frame pointer to the n-th local variable's
+ * reference flag slot.
+ *
+ * @param n the index to the local variable array
+ *
+ * @return the offset from frame pointer to the local variable slot
+ */
+static inline unsigned
+offset_of_ref(AOTCompContext *comp_ctx, unsigned n)
+{
+    AOTCompFrame *frame = comp_ctx->aot_frame;
+    uint32 all_cell_num = frame->max_local_cell_num + frame->max_stack_cell_num;
+    return offset_of_local(comp_ctx, all_cell_num) + n;
 }
 
 /**
@@ -138,6 +154,13 @@ offset_of_local(AOTCompContext *comp_ctx, unsigned n)
 bool
 aot_gen_commit_values(AOTCompFrame *frame);
 
+/**
+ * Generate instructions to restore computation result to the frame.
+ * The general principle is to only restore values that will be used
+ * through the frame.
+ *
+ * @param frame the frame information
+ */
 bool
 aot_gen_restore_values(AOTCompFrame *frame);
 
@@ -147,10 +170,8 @@ aot_gen_restore_values(AOTCompFrame *frame);
  * @param frame the frame information
  */
 bool
-aot_gen_commit_sp_ip(AOTCompFrame *frame, AOTValueSlot *sp, uint8 *ip);
-
-bool
-aot_gen_commit_ref_flags(AOTCompFrame *frame);
+aot_gen_commit_sp_ip(AOTCompFrame *frame, const AOTValueSlot *sp,
+                     const uint8 *ip);
 
 static inline void
 push_32bit(AOTCompFrame *frame, AOTValue *aot_value)
@@ -295,7 +316,7 @@ set_local_i64(AOTCompFrame *frame, int n, LLVMValueRef value)
     frame->lp[n].value = NULL;
     frame->lp[n].type = VALUE_TYPE_I64;
     frame->lp[n].dirty = 1;
-    frame->lp[n + 1].value = value;
+    frame->lp[n + 1].value = NULL;
     frame->lp[n + 1].type = VALUE_TYPE_I64;
     frame->lp[n + 1].dirty = 1;
 }
@@ -314,7 +335,7 @@ set_local_f64(AOTCompFrame *frame, int n, LLVMValueRef value)
     frame->lp[n].value = NULL;
     frame->lp[n].type = VALUE_TYPE_F64;
     frame->lp[n].dirty = 1;
-    frame->lp[n + 1].value = value;
+    frame->lp[n + 1].value = NULL;
     frame->lp[n + 1].type = VALUE_TYPE_F64;
     frame->lp[n + 1].dirty = 1;
 }

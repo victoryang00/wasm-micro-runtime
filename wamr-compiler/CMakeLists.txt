@@ -41,6 +41,7 @@ add_definitions(-DWASM_ENABLE_TAIL_CALL=1)
 add_definitions(-DWASM_ENABLE_SIMD=1)
 add_definitions(-DWASM_ENABLE_REF_TYPES=1)
 add_definitions(-DWASM_ENABLE_CUSTOM_NAME_SECTION=1)
+add_definitions(-DWASM_ENABLE_AOT_STACK_FRAME=1)
 add_definitions(-DWASM_ENABLE_DUMP_CALL_STACK=1)
 add_definitions(-DWASM_ENABLE_PERF_PROFILING=1)
 add_definitions(-DWASM_ENABLE_LOAD_CUSTOM_SECTION=1)
@@ -197,6 +198,12 @@ include_directories (${SHARED_DIR}/include
                      ${IWASM_DIR}/include)
 
 enable_language (ASM)
+
+if (NOT MINGW AND NOT MSVC)
+    set(WAMR_BUILD_LIBC_WASI 1)
+else()
+    set(WAMR_BUILD_LIBC_UVWASI 1)
+endif()
 
 include (${SHARED_DIR}/platform/${WAMR_BUILD_PLATFORM}/shared_platform.cmake)
 include (${SHARED_DIR}/mem-alloc/mem_alloc.cmake)

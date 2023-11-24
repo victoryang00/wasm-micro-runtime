@@ -310,9 +310,24 @@
 #define WASM_ENABLE_DUMP_CALL_STACK 0
 #endif
 
+/* AOT stack frame */
+#ifndef WASM_ENABLE_AOT_STACK_FRAME
+#define WASM_ENABLE_AOT_STACK_FRAME 0
+#endif
+
+/* JIT stack frame */
+#ifndef WASM_ENABLE_JIT_STACK_FRAME
+#define WASM_ENABLE_JIT_STACK_FRAME 0
+#endif
+
 /* Heap verification */
 #ifndef BH_ENABLE_GC_VERIFY
 #define BH_ENABLE_GC_VERIFY 0
+#endif
+
+/* Heap corruption check, enabled by default */
+#ifndef BH_ENABLE_GC_CORRUPTION_CHECK
+#define BH_ENABLE_GC_CORRUPTION_CHECK 1
 #endif
 
 /* Enable global heap pool if heap verification is enabled */
@@ -472,7 +487,7 @@
 /* Some chip cannot support external ram with rwx attr at the same time,
    it has to map it into 2 spaces of idbus and dbus, code in dbus can be
    read/written and read/executed in ibus. so there are 2 steps to execute
-   the code, first, copy&do relocaiton in dbus space, and second execute
+   the code, first, copy & do relocation in dbus space, and second execute
    it in ibus space, since in the 2 spaces the contents are the same,
    so we call it bus mirror.
  */

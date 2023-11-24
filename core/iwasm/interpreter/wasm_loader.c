@@ -173,7 +173,6 @@ fail:
 
 #define read_uint8(p) TEMPLATE_READ_VALUE(uint8, p)
 #define read_uint32(p) TEMPLATE_READ_VALUE(uint32, p)
-#define read_bool(p) TEMPLATE_READ_VALUE(bool, p)
 
 #define read_leb_int64(p, p_end, res)                                   \
     do {                                                                \
@@ -490,6 +489,7 @@ load_init_expr(const uint8 **p_buf, const uint8 *buf_end,
             if (type != VALUE_TYPE_V128)
                 goto fail_type_mismatch;
 
+            CHECK_BUF(p, p_end, 1);
             flag = read_uint8(p);
             (void)flag;
 
@@ -2895,7 +2895,8 @@ init_llvm_jit_functions_stage1(WASMModule *module, char *error_buf,
     option.enable_ref_types = true;
 #endif
     option.enable_aux_stack_check = true;
-#if (WASM_ENABLE_PERF_PROFILING != 0) || (WASM_ENABLE_DUMP_CALL_STACK != 0)
+#if (WASM_ENABLE_PERF_PROFILING != 0) || (WASM_ENABLE_DUMP_CALL_STACK != 0) \
+    || (WASM_ENABLE_JIT_STACK_FRAME != 0)
     option.enable_aux_stack_frame = true;
 #endif
 #if WASM_ENABLE_MEMORY_PROFILING != 0
@@ -7026,7 +7027,7 @@ wasm_loader_get_custom_section(WASMModule *module, const char *name,
         section = section->next;
     }
 
-    return false;
+    return NULL;
 }
 #endif
 
@@ -7138,6 +7139,7 @@ re_scan:
                 BlockType block_type;
 
                 p_org = p - 1;
+                CHECK_BUF(p, p_end, 1);
                 value_type = read_uint8(p);
                 if (is_byte_a_type(value_type)) {
                     /* If the first byte is one of these special values:
@@ -9099,6 +9101,7 @@ re_scan:
             {
                 uint32 opcode1;
 
+                CHECK_BUF(p, p_end, 1);
                 opcode1 = read_uint8(p);
                 /* follow the order of enum WASMSimdEXTOpcode in wasm_opcode.h
                  */
@@ -9760,6 +9763,7 @@ re_scan:
             {
                 uint32 opcode1;
 
+                CHECK_BUF(p, p_end, 1);
                 opcode1 = read_uint8(p);
 #if WASM_ENABLE_FAST_INTERP != 0
                 emit_byte(loader_ctx, opcode1);

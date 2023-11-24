@@ -23,11 +23,14 @@ static bool
 is_win_platform(AOTCompContext *comp_ctx)
 {
     char *triple = LLVMGetTargetMachineTriple(comp_ctx->target_machine);
+    bool ret;
 
     bh_assert(triple);
-    if (strstr(triple, "win32") || strstr(triple, "win"))
-        return true;
-    return false;
+    ret = (strstr(triple, "win32") || strstr(triple, "win")) ? true : false;
+
+    LLVMDisposeMessage(triple);
+
+    return ret;
 }
 
 static bool
@@ -512,7 +515,7 @@ aot_estimate_and_record_stack_usage_for_function_call(
 
 bool
 aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
-                    uint32 func_idx, bool tail_call, uint8 **p_frame_ip)
+                    uint32 func_idx, bool tail_call, const uint8 *frame_ip)
 {
     uint32 import_func_count = comp_ctx->comp_data->import_func_count;
     AOTImportFunc *import_funcs = comp_ctx->comp_data->import_funcs;
@@ -535,7 +538,7 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
     if (comp_ctx->aot_frame) {
         if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                                  *p_frame_ip))
+                                  frame_ip))
             return false;
         if (!aot_gen_commit_values(comp_ctx->aot_frame))
             return false;
@@ -543,7 +546,7 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         char name[32];
         LLVMBasicBlockRef new_llvm_block;
         snprintf(name, sizeof(name), "restore-%zu",
-                 (uint64)(uintptr_t)(*p_frame_ip - func_ctx->aot_func->code));
+                 (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
         if (!(new_llvm_block = LLVMAppendBasicBlockInContext(
                   comp_ctx->context, func_ctx->func, name))) {
             aot_set_last_error("add LLVM basic block failed.");
@@ -560,10 +563,10 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         LLVMValueRef ip_offset;
         if (comp_ctx->pointer_size == sizeof(uint64))
             ip_offset = I64_CONST(
-                (uint64)(uintptr_t)(*p_frame_ip - func_ctx->aot_func->code));
+                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
         else
             ip_offset = I32_CONST(
-                (uint32)(uintptr_t)(*p_frame_ip - func_ctx->aot_func->code));
+                (uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
 
         LLVMAddCase(func_ctx->restore_switch, ip_offset, new_llvm_block);
 
@@ -599,6 +602,23 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
     /* Get param cell number */
     param_cell_num = func_type->param_cell_num;
+
+    if (comp_ctx->aot_frame) {
+        if (!aot_gen_commit_values(comp_ctx->aot_frame))
+            return false;
+        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
+                                  comp_ctx->aot_frame->sp - param_cell_num,
+                                  frame_ip))
+            return false;
+    }
+
+#if WASM_ENABLE_THREAD_MGR != 0
+    /* Insert suspend check point */
+    if (comp_ctx->enable_thread_mgr) {
+        if (!check_suspend_flags(comp_ctx, func_ctx, true))
+            return false;
+    }
+#endif
 
 #if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
     if (comp_ctx->enable_aux_stack_frame) {
@@ -1107,7 +1127,7 @@ call_aot_call_indirect_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 bool
 aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                              uint32 type_idx, uint32 tbl_idx,
-                             uint8 **p_frame_ip)
+                             const uint8 *frame_ip)
 {
     AOTFuncType *func_type;
     LLVMValueRef tbl_idx_value, elem_idx, table_elem, func_idx;
@@ -1133,7 +1153,7 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
     if (comp_ctx->aot_frame) {
         if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                                  *p_frame_ip))
+                                  frame_ip))
             return false;
         if (!aot_gen_commit_values(comp_ctx->aot_frame))
             return false;
@@ -1141,7 +1161,7 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         char name[32];
         LLVMBasicBlockRef new_llvm_block;
         snprintf(name, sizeof(name), "restore-%zu",
-                 (uint64)(uintptr_t)(*p_frame_ip - func_ctx->aot_func->code));
+                 (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
         if (!(new_llvm_block = LLVMAppendBasicBlockInContext(
                   comp_ctx->context, func_ctx->func, name))) {
             aot_set_last_error("add LLVM basic block failed.");
@@ -1158,10 +1178,10 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         LLVMValueRef ip_offset;
         if (comp_ctx->pointer_size == sizeof(uint64))
             ip_offset = I64_CONST(
-                (uint64)(uintptr_t)(*p_frame_ip - func_ctx->aot_func->code));
+                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
         else
             ip_offset = I32_CONST(
-                (uint32)(uintptr_t)(*p_frame_ip - func_ctx->aot_func->code));
+                (uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
 
         LLVMAddCase(func_ctx->restore_switch, ip_offset, new_llvm_block);
 
@@ -1192,6 +1212,15 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                                                           func_type);
     func_param_count = func_type->param_count;
     func_result_count = func_type->result_count;
+
+    if (comp_ctx->aot_frame) {
+        if (!aot_gen_commit_values(comp_ctx->aot_frame))
+            return false;
+        if (!aot_gen_commit_sp_ip(
+                comp_ctx->aot_frame,
+                comp_ctx->aot_frame->sp - func_type->param_cell_num, frame_ip))
+            return false;
+    }
 
     POP_I32(elem_idx);
 

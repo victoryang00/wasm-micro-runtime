@@ -158,7 +158,7 @@ typedef struct AOTModule {
     void **func_ptrs;
     /* func type indexes of AOTed (un-imported) functions */
     uint32 *func_type_indexes;
-#if WASM_ENABLE_DUMP_CALL_STACK != 0 || WASM_ENABLE_PERF_PROFILING != 0
+#if WASM_ENABLE_AOT_STACK_FRAME != 0
     /* max local cell nums of AOTed (un-imported) functions */
     uint32 *max_local_cell_nums;
     /* max stack cell nums of AOTed (un-imported) functions */
@@ -314,10 +314,15 @@ typedef struct AOTFrame {
     /* Operand stack top pointer of the current frame */
     uint32 *sp;
 
+    /* Frame ref flags (GC only) */
+    uint8 *frame_ref;
+
     /**
      * Frame data, the layout is:
      *  local area: parameters and local variables
      *  stack area: wasm operand stack
+     *  frame ref flags (GC only):
+     *      whether each cell in local and stack area is a GC obj
      */
     uint32 lp[1];
 } AOTFrame;

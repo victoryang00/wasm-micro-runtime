@@ -155,6 +155,13 @@ aot_target_precheck_can_use_musttail(const AOTCompContext *comp_ctx)
          */
         return false;
     }
+    if (strstr(comp_ctx->target_arch, "thumb")) {
+        /*
+         * cf.
+         * https://github.com/bytecodealliance/wasm-micro-runtime/issues/2412
+         */
+        return false;
+    }
     /*
      * x86-64/i386: true
      *
@@ -911,6 +918,27 @@ create_aux_stack_info(const AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
 }
 
 static bool
+create_aux_stack_frame(const AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
+{
+    LLVMValueRef offset = I32_ONE, cur_frame_addr;
+
+    if (!(cur_frame_addr = LLVMBuildInBoundsGEP2(
+              comp_ctx->builder, OPQ_PTR_TYPE, func_ctx->exec_env, &offset, 1,
+              "cur_frame_addr"))) {
+        aot_set_last_error("llvm build in bounds gep failed");
+        return false;
+    }
+
+    if (!(func_ctx->cur_frame = LLVMBuildLoad2(comp_ctx->builder, OPQ_PTR_TYPE,
+                                               cur_frame_addr, "cur_frame"))) {
+        aot_set_last_error("llvm build load failed");
+        return false;
+    }
+
+    return true;
+}
+
+static bool
 create_native_symbol(const AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
 {
     LLVMValueRef native_symbol_offset = I32_EIGHT, native_symbol_addr;
@@ -1586,6 +1614,11 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
         goto fail;
     }
 
+    if (comp_ctx->enable_aux_stack_frame
+        && !create_aux_stack_frame(comp_ctx, func_ctx)) {
+        goto fail;
+    }
+
     /* Create local variables */
     if (!create_local_variables(comp_data, comp_ctx, func_ctx, func)) {
         goto fail;
@@ -1919,6 +1952,7 @@ static ArchItem valid_archs[] = {
 static const char *valid_abis[] = {
     "gnu",
     "eabi",
+    "eabihf",
     "gnueabihf",
     "msvc",
     "ilp32",
@@ -1934,13 +1968,33 @@ static void
 print_supported_targets()
 {
     uint32 i;
+    const char *target_name;
+
     os_printf("Supported targets:\n");
-    for (i = 0; i < sizeof(valid_archs) / sizeof(ArchItem); i++) {
-        os_printf("%s ", valid_archs[i].arch);
-        if (valid_archs[i].support_eb)
-            os_printf("%seb ", valid_archs[i].arch);
+    /* over the list of all available targets */
+    for (LLVMTargetRef target = LLVMGetFirstTarget(); target != NULL;
+         target = LLVMGetNextTarget(target)) {
+        target_name = LLVMGetTargetName(target);
+        /* Skip mipsel, aarch64_be since prefix mips, aarch64 will cover them */
+        if (strcmp(target_name, "mipsel") == 0)
+            continue;
+        else if (strcmp(target_name, "aarch64_be") == 0)
+            continue;
+
+        if (strcmp(target_name, "x86-64") == 0)
+            os_printf("  x86_64\n");
+        else if (strcmp(target_name, "x86") == 0)
+            os_printf("  i386\n");
+        else {
+            for (i = 0; i < sizeof(valid_archs) / sizeof(ArchItem); i++) {
+                /* If target_name is prefix for valid_archs[i].arch */
+                if ((strncmp(target_name, valid_archs[i].arch,
+                             strlen(target_name))
+                     == 0))
+                    os_printf("  %s\n", valid_archs[i].arch);
+            }
+        }
     }
-    os_printf("\n");
 }
 
 static void
@@ -1994,6 +2048,18 @@ get_target_arch_from_triple(const char *triple, char *arch_buf, uint32 buf_size)
         arch_buf[i++] = *triple++;
     /* Make sure buffer is long enough */
     bh_assert(*triple == '-' || *triple == '\0');
+}
+
+static bool
+is_baremetal_target(const char *target, const char *cpu, const char *abi)
+{
+    /* TODO: support more baremetal targets */
+    if (target) {
+        /* If target is thumbxxx, then it is baremetal target */
+        if (!strncmp(target, "thumb", strlen("thumb")))
+            return true;
+    }
+    return false;
 }
 
 void
@@ -2221,7 +2287,7 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
     char *triple_norm_new = NULL, *cpu_new = NULL;
     char *err = NULL, *fp_round = "round.tonearest",
          *fp_exce = "fpexcept.strict";
-    char triple_buf[32] = { 0 }, features_buf[128] = { 0 };
+    char triple_buf[128] = { 0 }, features_buf[128] = { 0 };
     uint32 opt_level, size_level, i;
     LLVMCodeModel code_model;
     LLVMTargetDataRef target_data_ref;
@@ -2534,6 +2600,7 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
              * for Windows/MacOS under Linux host, or generating AOT file for
              * Linux/MacOS under Windows host.
              */
+
             if (!strcmp(abi, "msvc")) {
                 if (!strcmp(arch1, "i386"))
                     vendor_sys = "-pc-win32-";
@@ -2541,7 +2608,10 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
                     vendor_sys = "-pc-windows-";
             }
             else {
-                vendor_sys = "-pc-linux-";
+                if (is_baremetal_target(arch, cpu, abi))
+                    vendor_sys = "-unknown-none-";
+                else
+                    vendor_sys = "-pc-linux-";
             }
 
             bh_assert(strlen(arch1) + strlen(vendor_sys) + strlen(abi)
@@ -2576,6 +2646,11 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
                 vendor_sys = "-pc-win32-";
                 if (!abi)
                     abi = "msvc";
+            }
+            else if (is_baremetal_target(arch, cpu, abi)) {
+                vendor_sys = "-unknown-none-";
+                if (!abi)
+                    abi = "gnu";
             }
             else {
                 vendor_sys = "-pc-linux-";

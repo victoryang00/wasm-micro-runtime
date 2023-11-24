@@ -8,6 +8,7 @@
 #include "bh_platform.h"
 #include "wasm_export.h"
 #include "wasm_runtime_common.h"
+#include "wasmtime_ssp.h"
 
 
 
@@ -197,7 +198,7 @@ wasi_clock_res_get(wasm_exec_env_t exec_env,
     if (!validate_native_addr(resolution, sizeof(wasi_timestamp_t)))
         return (wasi_errno_t)-1;
 
-    return wasmtime_ssp_clock_res_get(clock_id, resolution);
+    return os_clock_res_get(clock_id, resolution);
 }
 
 static wasi_errno_t
@@ -211,7 +212,7 @@ wasi_clock_time_get(wasm_exec_env_t exec_env,
     if (!validate_native_addr(time, sizeof(wasi_timestamp_t)))
         return (wasi_errno_t)-1;
 
-    return wasmtime_ssp_clock_time_get(clock_id, precision, time);
+    return os_clock_time_get(clock_id, precision, time);
 }
 
 static wasi_errno_t

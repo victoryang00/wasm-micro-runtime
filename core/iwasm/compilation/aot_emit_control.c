@@ -229,6 +229,9 @@ handle_next_reachable_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                 *p_frame_ip = block->wasm_code_else + 1;
                 /* Push back the block */
                 aot_block_stack_push(&func_ctx->block_stack, block);
+                /* Recover parameters of else branch */
+                for (i = 0; i < block->param_count; i++)
+                    PUSH(block->else_param_phis[i], block->param_types[i]);
                 return true;
             }
             else if (block->llvm_end_block) {
@@ -245,6 +248,19 @@ handle_next_reachable_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 
     if (!block) {
         *p_frame_ip = frame_ip + 1;
+        return true;
+    }
+
+    if (block->label_type == LABEL_TYPE_IF && block->llvm_else_block
+        && !block->skip_wasm_code_else
+        && *p_frame_ip <= block->wasm_code_else) {
+        /* Clear value stack and start to translate else branch */
+        aot_value_stack_destroy(comp_ctx, &block->value_stack);
+        /* Recover parameters of else branch */
+        for (i = 0; i < block->param_count; i++)
+            PUSH(block->else_param_phis[i], block->param_types[i]);
+        SET_BUILDER_POS(block->llvm_else_block);
+        *p_frame_ip = block->wasm_code_else + 1;
         return true;
     }
 
@@ -1086,6 +1102,23 @@ aot_compile_op_br_table(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     }
 
     if (!LLVMIsEfficientConstInt(value_cmp)) {
+#if WASM_ENABLE_THREAD_MGR != 0
+        if (comp_ctx->enable_thread_mgr) {
+            for (i = 0; i <= br_count; i++) {
+                target_block = get_target_block(func_ctx, br_depths[i]);
+                if (!target_block)
+                    return false;
+                /* Terminate or suspend current thread only when this is a
+                   backward jump */
+                if (target_block->label_type == LABEL_TYPE_LOOP) {
+                    if (!check_suspend_flags(comp_ctx, func_ctx, true))
+                        return false;
+                    break;
+                }
+            }
+        }
+#endif
+
         /* Compare value is not constant, create switch IR */
         for (i = 0; i <= br_count; i++) {
             target_block = get_target_block(func_ctx, br_depths[i]);

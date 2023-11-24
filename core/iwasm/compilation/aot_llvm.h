@@ -53,15 +53,15 @@ extern "C" {
 #define OPQ_PTR_TYPE INT8_PTR_TYPE
 #endif
 
-//#ifndef NDEBUG
+#ifndef NDEBUG
 #undef DEBUG_PASS
 #undef DUMP_MODULE
-//#define DEBUG_PASS
-//#define DUMP_MODULE
-//#else
-//#undef DEBUG_PASS
-//#undef DUMP_MODULE
-//#endif
+// #define DEBUG_PASS
+// #define DUMP_MODULE
+#else
+#undef DEBUG_PASS
+#undef DUMP_MODULE
+#endif
 
 struct AOTValueSlot;
 
