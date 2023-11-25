@@ -227,29 +227,27 @@ aot_gen_commit_values(AOTCompFrame *frame)
     uint32 n, local_idx;
 
     for (p = frame->lp, local_idx = 0; p < frame->sp; p++, local_idx++) {
-        // TODO: dirty flag has some unknown issue, disable it for now
-        // hope backend can optimize it
-        // if (!p->dirty) {
-        //     switch (p->type) {
-        //         case VALUE_TYPE_I32:
-        //         case VALUE_TYPE_FUNCREF:
-        //         case VALUE_TYPE_EXTERNREF:
-        //         case VALUE_TYPE_F32:
-        //         case VALUE_TYPE_I1:
-        //             break;
-        //         case VALUE_TYPE_I64:
-        //         case VALUE_TYPE_F64:
-        //             p++;
-        //             break;
-        //         case VALUE_TYPE_V128:
-        //             p += 3;
-        //             break;
-        //         default:
-        //             bh_assert(0);
-        //             break;
-        //     }
-        //     continue;
-        // }
+        if (!p->dirty) {
+            switch (p->type) {
+                case VALUE_TYPE_I32:
+                case VALUE_TYPE_FUNCREF:
+                case VALUE_TYPE_EXTERNREF:
+                case VALUE_TYPE_F32:
+                case VALUE_TYPE_I1:
+                    break;
+                case VALUE_TYPE_I64:
+                case VALUE_TYPE_F64:
+                    p++;
+                    break;
+                case VALUE_TYPE_V128:
+                    p += 3;
+                    break;
+                default:
+                    bh_assert(0);
+                    break;
+            }
+            continue;
+        }
 
         p->dirty = 0;
         n = p - frame->lp;
@@ -954,12 +952,14 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR:
+                aot_gen_commit_values(comp_ctx->aot_frame);
                 read_leb_uint32(frame_ip, frame_ip_end, br_depth);
                 if (!aot_compile_op_br(comp_ctx, func_ctx, br_depth, &frame_ip))
                     return false;
                 break;
 
             case WASM_OP_BR_IF:
+                aot_gen_commit_values(comp_ctx->aot_frame);
                 read_leb_uint32(frame_ip, frame_ip_end, br_depth);
                 if (!aot_compile_op_br_if(comp_ctx, func_ctx, br_depth,
                                           &frame_ip))
@@ -967,6 +967,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR_TABLE:
+                aot_gen_commit_values(comp_ctx->aot_frame);
                 read_leb_uint32(frame_ip, frame_ip_end, br_count);
                 if (!(br_depths = wasm_runtime_malloc((uint32)sizeof(uint32)
                                                       * (br_count + 1)))) {
@@ -993,6 +994,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 #if WASM_ENABLE_FAST_INTERP == 0
             case EXT_OP_BR_TABLE_CACHE:
             {
+                aot_gen_commit_values(comp_ctx->aot_frame);
                 BrTableCache *node = bh_list_first_elem(
                     comp_ctx->comp_data->wasm_module->br_table_cache_list);
                 BrTableCache *node_next;

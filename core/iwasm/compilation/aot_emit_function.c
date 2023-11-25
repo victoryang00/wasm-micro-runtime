@@ -565,14 +565,14 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     /* Get param cell number */
     param_cell_num = func_type->param_cell_num;
 
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
-                                  comp_ctx->aot_frame->sp - param_cell_num,
-                                  frame_ip))
-            return false;
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (!aot_gen_commit_values(comp_ctx->aot_frame))
+    //         return false;
+    //     if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame,
+    //                               comp_ctx->aot_frame->sp - param_cell_num,
+    //                               frame_ip))
+    //         return false;
+    // }
 
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Insert suspend check point */
@@ -1137,14 +1137,14 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     func_param_count = func_type->param_count;
     func_result_count = func_type->result_count;
 
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-        if (!aot_gen_commit_sp_ip(
-                comp_ctx->aot_frame,
-                comp_ctx->aot_frame->sp - func_type->param_cell_num, frame_ip))
-            return false;
-    }
+    // if (comp_ctx->aot_frame) {
+    //     if (!aot_gen_commit_values(comp_ctx->aot_frame))
+    //         return false;
+    //     if (!aot_gen_commit_sp_ip(
+    //             comp_ctx->aot_frame,
+    //             comp_ctx->aot_frame->sp - func_type->param_cell_num, frame_ip))
+    //         return false;
+    // }
 
     POP_I32(elem_idx);
 
