@@ -747,6 +747,52 @@ init_comp_frame(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     return true;
 }
 
+bool
+aot_gen_checkpoint(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
+                            const uint8 *frame_ip)
+{
+    if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
+                              frame_ip))
+        return false;
+    if (!aot_gen_commit_values(comp_ctx->aot_frame))
+        return false;
+
+    char name[32];
+    LLVMBasicBlockRef new_llvm_block;
+    snprintf(name, sizeof(name), "restore-%zu",
+             (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+    if (!(new_llvm_block = LLVMAppendBasicBlockInContext(
+              comp_ctx->context, func_ctx->func, name))) {
+        aot_set_last_error("add LLVM basic block failed.");
+        return false;
+    }
+    LLVMMoveBasicBlockAfter(new_llvm_block,
+                            LLVMGetInsertBlock(comp_ctx->builder));
+    if (!LLVMBuildBr(comp_ctx->builder, new_llvm_block)) {
+        aot_set_last_error("llvm build br failed.");
+        return false;
+    }
+    LLVMPositionBuilderAtEnd(comp_ctx->builder, new_llvm_block);
+
+    LLVMValueRef ip_offset;
+    if (comp_ctx->pointer_size == sizeof(uint64))
+        ip_offset =
+            I64_CONST((uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+    else
+        ip_offset =
+            I32_CONST((uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+
+    LLVMAddCase(func_ctx->restore_switch, ip_offset, new_llvm_block);
+
+    if (!aot_gen_restore_values(comp_ctx->aot_frame))
+        return false;
+
+    if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))
+        return false;
+
+    return true;
+}
+
 static bool
 aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 {
@@ -833,23 +879,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                                   func_ctx->restore_switch);
     }
 
-#define EMIT_CHECKPOINT()                                                   \
-    if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp, \
-                              frame_ip))                                    \
-        return false;                                                       \
-    if (!aot_gen_commit_values(comp_ctx->aot_frame))                        \
-        return false;                                                       \
-    if (!aot_gen_restore_values(comp_ctx->aot_frame))                       \
-        return false;                                                       \
-    if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))                    \
-        return false;
-
-    // fprintf(stderr, "Compiling aot_func#%d\n", func_index);
-
-    EMIT_CHECKPOINT();
-
     while (frame_ip < frame_ip_end) {
-        // EMIT_CHECKPOINT();
         // fprintf(stderr, "%p\n", (void*)comp_ctx->aot_frame);
         opcode = *frame_ip++;
 
@@ -997,6 +1027,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_CALL:
             {
                 uint8 *frame_ip_org = frame_ip;
+                aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
 
                 read_leb_uint32(frame_ip, frame_ip_end, func_idx);
                 if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, false,
@@ -1010,6 +1041,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
+                aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
                 read_leb_uint32(frame_ip, frame_ip_end, type_idx);
 
 #if WASM_ENABLE_REF_TYPES != 0

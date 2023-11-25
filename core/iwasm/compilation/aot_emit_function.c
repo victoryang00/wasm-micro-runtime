@@ -536,44 +536,6 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     bool ret = false;
     char buf[32];
 
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                                  frame_ip))
-            return false;
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-
-        char name[32];
-        LLVMBasicBlockRef new_llvm_block;
-        snprintf(name, sizeof(name), "restore-%zu",
-                 (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-        if (!(new_llvm_block = LLVMAppendBasicBlockInContext(
-                  comp_ctx->context, func_ctx->func, name))) {
-            aot_set_last_error("add LLVM basic block failed.");
-            goto fail;
-        }
-        LLVMMoveBasicBlockAfter(new_llvm_block,
-                                LLVMGetInsertBlock(comp_ctx->builder));
-        if (!LLVMBuildBr(comp_ctx->builder, new_llvm_block)) {
-            aot_set_last_error("llvm build br failed.");
-            goto fail;
-        }
-        LLVMPositionBuilderAtEnd(comp_ctx->builder, new_llvm_block);
-
-        LLVMValueRef ip_offset;
-        if (comp_ctx->pointer_size == sizeof(uint64))
-            ip_offset = I64_CONST(
-                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-        else
-            ip_offset = I32_CONST(
-                (uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-
-        LLVMAddCase(func_ctx->restore_switch, ip_offset, new_llvm_block);
-
-        if (!aot_gen_restore_values(comp_ctx->aot_frame))
-            return false;
-    }
-
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Insert suspend check point */
     if (comp_ctx->enable_thread_mgr) {
@@ -1150,44 +1112,6 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     uint64 total_size;
     char buf[32];
     bool ret = false;
-
-    if (comp_ctx->aot_frame) {
-        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                                  frame_ip))
-            return false;
-        if (!aot_gen_commit_values(comp_ctx->aot_frame))
-            return false;
-
-        char name[32];
-        LLVMBasicBlockRef new_llvm_block;
-        snprintf(name, sizeof(name), "restore-%zu",
-                 (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-        if (!(new_llvm_block = LLVMAppendBasicBlockInContext(
-                  comp_ctx->context, func_ctx->func, name))) {
-            aot_set_last_error("add LLVM basic block failed.");
-            goto fail;
-        }
-        LLVMMoveBasicBlockAfter(new_llvm_block,
-                                LLVMGetInsertBlock(comp_ctx->builder));
-        if (!LLVMBuildBr(comp_ctx->builder, new_llvm_block)) {
-            aot_set_last_error("llvm build br failed.");
-            goto fail;
-        }
-        LLVMPositionBuilderAtEnd(comp_ctx->builder, new_llvm_block);
-
-        LLVMValueRef ip_offset;
-        if (comp_ctx->pointer_size == sizeof(uint64))
-            ip_offset = I64_CONST(
-                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-        else
-            ip_offset = I32_CONST(
-                (uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-
-        LLVMAddCase(func_ctx->restore_switch, ip_offset, new_llvm_block);
-
-        if (!aot_gen_restore_values(comp_ctx->aot_frame))
-            return false;
-    }
 
     /* Check function type index */
     if (type_idx >= comp_ctx->comp_data->func_type_count) {
