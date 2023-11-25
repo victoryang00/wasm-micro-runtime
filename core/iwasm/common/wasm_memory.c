@@ -570,32 +570,32 @@ wasm_check_app_addr_and_convert(WASMModuleInstance *module_inst, bool is_str,
 
     /* No need to check the app_offset and buf_size if memory access
        boundary check with hardware trap is enabled */
-#ifndef OS_ENABLE_HW_BOUND_CHECK
-    SHARED_MEMORY_LOCK(memory_inst);
+// #ifndef OS_ENABLE_HW_BOUND_CHECK
+//     SHARED_MEMORY_LOCK(memory_inst);
 
-    if (app_buf_addr >= memory_inst->memory_data_size) {
-        goto fail;
-    }
+//     if (app_buf_addr >= memory_inst->memory_data_size) {
+//         goto fail;
+//     }
 
-    if (!is_str) {
-        if (app_buf_size > memory_inst->memory_data_size - app_buf_addr) {
-            goto fail;
-        }
-    }
-    else {
-        const char *str, *str_end;
+//     if (!is_str) {
+//         if (app_buf_size > memory_inst->memory_data_size - app_buf_addr) {
+//             goto fail;
+//         }
+//     }
+//     else {
+//         const char *str, *str_end;
 
-        /* The whole string must be in the linear memory */
-        str = (const char *)native_addr;
-        str_end = (const char *)memory_inst->memory_data_end;
-        while (str < str_end && *str != '\0')
-            str++;
-        if (str == str_end)
-            goto fail;
-    }
+//         /* The whole string must be in the linear memory */
+//         str = (const char *)native_addr;
+//         str_end = (const char *)memory_inst->memory_data_end;
+//         while (str < str_end && *str != '\0')
+//             str++;
+//         if (str == str_end)
+//             goto fail;
+//     }
 
-    SHARED_MEMORY_UNLOCK(memory_inst);
-#endif
+//     SHARED_MEMORY_UNLOCK(memory_inst);
+// #endif
 
     SHARED_MEMORY_UNLOCK(memory_inst);
 
