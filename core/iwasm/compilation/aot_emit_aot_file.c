@@ -1233,11 +1233,6 @@ get_name_section_size(AOTCompData *comp_data)
     uint32 offset = 0;
     uint32 max_aot_buf_size = 0;
 
-    if (p >= p_end) {
-        aot_set_last_error("unexpected end");
-        return 0;
-    }
-
     max_aot_buf_size = 4 * (uint32)(p_end - p);
     if (!(buf = comp_data->aot_name_section_buf =
               wasm_runtime_malloc(max_aot_buf_size))) {
@@ -1249,11 +1244,6 @@ get_name_section_size(AOTCompData *comp_data)
     read_leb_uint32(p, p_end, name_len);
     offset = align_uint(offset, 4);
     EMIT_U32(name_len);
-
-    if (name_len == 0 || p + name_len > p_end) {
-        aot_set_last_error("unexpected end");
-        return 0;
-    }
 
     if (!check_utf8_str(p, name_len)) {
         aot_set_last_error("invalid UTF-8 encoding");

@@ -88,11 +88,11 @@ static bool
 check_buf(const uint8 *buf, const uint8 *buf_end, uint32 length,
           char *error_buf, uint32 error_buf_size)
 {
-    if ((uintptr_t)buf + length < (uintptr_t)buf
-        || (uintptr_t)buf + length > (uintptr_t)buf_end) {
-        set_error_buf(error_buf, error_buf_size, "unexpect end");
-        return false;
-    }
+    // if ((uintptr_t)buf + length < (uintptr_t)buf
+    //     || (uintptr_t)buf + length > (uintptr_t)buf_end) {
+    //     set_error_buf(error_buf, error_buf_size, "unexpect end");
+    //     return false;
+    // }
     return true;
 }
 
@@ -692,22 +692,8 @@ load_name_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
     uint32 name_len;
     uint64 size;
 
-    if (p >= p_end) {
-        set_error_buf(error_buf, error_buf_size, "unexpected end");
-        return false;
-    }
-
     read_uint32(p, p_end, name_len);
 
-    if (name_len != 4 || p + name_len > p_end) {
-        set_error_buf(error_buf, error_buf_size, "unexpected end");
-        return false;
-    }
-
-    if (memcmp(p, "name", 4) != 0) {
-        set_error_buf(error_buf, error_buf_size, "invalid custom name section");
-        return false;
-    }
     p += name_len;
 
     while (p < p_end) {
@@ -776,10 +762,8 @@ load_name_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
                         previous_func_index = func_index;
                         *(aux_func_indexes + name_index) = func_index;
                         read_string(p, p_end, *(aux_func_names + name_index));
-#if 0
                         LOG_DEBUG("func_index %u -> aux_func_name = %s\n",
                                func_index, *(aux_func_names + name_index));
-#endif
                     }
                 }
                 break;
@@ -829,11 +813,6 @@ load_custom_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
         {
             const char *section_name;
             WASMCustomSection *section;
-
-            if (p >= p_end) {
-                set_error_buf(error_buf, error_buf_size, "unexpected end");
-                goto fail;
-            }
 
             read_string(p, p_end, section_name);
 
