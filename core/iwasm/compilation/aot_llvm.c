@@ -3140,8 +3140,14 @@ aot_value_stack_push(const AOTCompContext *comp_ctx, AOTValueStack *stack,
         fprintf(stderr, "gen value %d type error\n", value->type);
         exit(-1);
     }
-    alloca = LLVMBuildAlloca(comp_ctx->aot_frame_alloca_builder,
-                             llvm_value_type, "wasm_stack_alloca");
+    if (comp_ctx->aot_frame) {
+        alloca = LLVMBuildAlloca(comp_ctx->aot_frame_alloca_builder,
+                                 llvm_value_type, "wasm_stack_alloca");
+    }
+    else {
+        alloca = LLVMBuildAlloca(comp_ctx->builder, llvm_value_type,
+                                 "wasm_stack_alloca");
+    }
     if (alloca == NULL) {
         fprintf(stderr, "gen value alloca error\n");
         exit(-1);
