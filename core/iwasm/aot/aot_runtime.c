@@ -2937,20 +2937,11 @@ aot_free_frame(WASMExecEnv *exec_env)
     // fprintf(stderr, "aot_free_frame %zu\n", ((AOTFrame*)exec_env->cur_frame)->func_index);
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    counter_++;
-    if (counter_ > SNAPSHOT_DEBUG_STEP + SNAPSHOT_STEP) {
-        serialize_to_file(exec_env);
-    }
-#endif
 
 #if WASM_ENABLE_PERF_PROFILING != 0
     cur_frame->func_perf_prof_info->total_exec_time +=
         (uintptr_t)os_time_get_boot_microsecond() - cur_frame->time_started;
     cur_frame->func_perf_prof_info->total_exec_cnt++;
-#endif
-#if WASM_ENABLE_CHECKPOINT_SNAPSHOT != 0
-// snapshot
 #endif
     wasm_exec_env_free_wasm_frame(exec_env, cur_frame);
     exec_env->cur_frame = (struct WASMInterpFrame *)prev_frame;
