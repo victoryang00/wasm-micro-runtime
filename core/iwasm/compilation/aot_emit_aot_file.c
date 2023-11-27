@@ -1295,6 +1295,7 @@ get_name_section_size(AOTCompData *comp_data)
                             aot_set_last_error("out-of-order function index ");
                             return 0;
                         }
+                        // printf("%d:%s\n",func_index,p);
                         previous_func_index = func_index;
                         read_leb_uint32(p, p_end, func_name_len);
                         offset = align_uint(offset, 2);
