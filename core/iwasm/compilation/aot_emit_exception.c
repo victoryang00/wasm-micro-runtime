@@ -156,7 +156,12 @@ aot_compile_emit_fence_nop(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
         return false;
     }
     LLVMTypeRef ty = LLVMFunctionType(LLVMVoidType(), NULL, 0, false);
-    char *asm_string = strdup("int $$3");
+    char *asm_string;
+    if(!strcmp(comp_ctx->target_arch, "x86_64")) {
+        asm_string = strdup("int $$3");
+    }else{
+        asm_string = strdup("brk #0x1");
+    }
     if (!(inline_asm = LLVMGetInlineAsm(
               ty, asm_string, strlen(asm_string), "~{dirflag},~{fpsr},~{flags}",
               27, true, false, LLVMInlineAsmDialectATT, false))) {

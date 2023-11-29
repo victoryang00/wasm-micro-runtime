@@ -98,7 +98,7 @@ convert(LLVMCodeModel code_model, bool *jit)
         case LLVMCodeModelSmall:
             return llvm::CodeModel::Small;
         case LLVMCodeModelKernel:
-            return llvm::CodeModel::Kernel;
+            return llvm::CodeModel::Medium;
         case LLVMCodeModelMedium:
             return llvm::CodeModel::Medium;
         case LLVMCodeModelLarge:
