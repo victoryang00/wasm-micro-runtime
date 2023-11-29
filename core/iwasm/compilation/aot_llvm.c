@@ -2390,6 +2390,18 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
     if (option->enable_aux_stack_frame)
         comp_ctx->enable_aux_stack_frame = true;
 
+    if (option->enable_checkpoint)
+        comp_ctx->enable_checkpoint = true;
+
+    if (option->enable_br_checkpoint)
+        comp_ctx->enable_br_checkpoint = true;
+
+    if (option->enable_every_checkpoint)
+        comp_ctx->enable_every_checkpoint = true;
+
+    if (option->enable_aux_stack_dirty_bit)
+        comp_ctx->enable_aux_stack_dirty_bit = true;
+
     if (option->enable_aux_stack_check)
         comp_ctx->enable_aux_stack_check = true;
 

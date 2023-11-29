@@ -227,26 +227,28 @@ aot_gen_commit_values(AOTCompFrame *frame)
     uint32 n, local_idx;
 
     for (p = frame->lp, local_idx = 0; p < frame->sp; p++, local_idx++) {
-        if (!p->dirty) {
-            switch (p->type) {
-                case VALUE_TYPE_I32:
-                case VALUE_TYPE_FUNCREF:
-                case VALUE_TYPE_EXTERNREF:
-                case VALUE_TYPE_F32:
-                case VALUE_TYPE_I1:
-                    break;
-                case VALUE_TYPE_I64:
-                case VALUE_TYPE_F64:
-                    p++;
-                    break;
-                case VALUE_TYPE_V128:
-                    p += 3;
-                    break;
-                default:
-                    bh_assert(0);
-                    break;
+        if (comp_ctx->enable_aux_stack_dirty_bit) {
+            if (!p->dirty) {
+                switch (p->type) {
+                    case VALUE_TYPE_I32:
+                    case VALUE_TYPE_FUNCREF:
+                    case VALUE_TYPE_EXTERNREF:
+                    case VALUE_TYPE_F32:
+                    case VALUE_TYPE_I1:
+                        break;
+                    case VALUE_TYPE_I64:
+                    case VALUE_TYPE_F64:
+                        p++;
+                        break;
+                    case VALUE_TYPE_V128:
+                        p += 3;
+                        break;
+                    default:
+                        bh_assert(0);
+                        break;
+                }
+                continue;
             }
-            continue;
         }
 
         p->dirty = 0;
@@ -883,6 +885,11 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         // fprintf(stderr, "%p\n", (void*)comp_ctx->aot_frame);
         opcode = *frame_ip++;
 
+        if (comp_ctx->enable_every_checkpoint) {
+            bh_assert(comp_ctx->aot_frame);
+            aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+        }
+
 #if WASM_ENABLE_DEBUG_AOT != 0
         location = dwarf_gen_location(
             comp_ctx, func_ctx,
@@ -954,16 +961,32 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR:
-                if (comp_ctx->aot_frame)
-                    aot_gen_commit_values(comp_ctx->aot_frame);
+                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                    if (comp_ctx->enable_br_checkpoint) {
+                        aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+                    } else {
+                        if (comp_ctx->enable_aux_stack_dirty_bit) {
+                            aot_gen_commit_values(comp_ctx->aot_frame);
+                        }
+                    }
+                }
+
                 read_leb_uint32(frame_ip, frame_ip_end, br_depth);
                 if (!aot_compile_op_br(comp_ctx, func_ctx, br_depth, &frame_ip))
                     return false;
                 break;
 
             case WASM_OP_BR_IF:
-                if (comp_ctx->aot_frame)
-                    aot_gen_commit_values(comp_ctx->aot_frame);
+                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                    if (comp_ctx->enable_br_checkpoint) {
+                        aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+                    } else {
+                        if (comp_ctx->enable_aux_stack_dirty_bit) {
+                            aot_gen_commit_values(comp_ctx->aot_frame);
+                        }
+                    }
+                }
+
                 read_leb_uint32(frame_ip, frame_ip_end, br_depth);
                 if (!aot_compile_op_br_if(comp_ctx, func_ctx, br_depth,
                                           &frame_ip))
@@ -971,8 +994,16 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR_TABLE:
-                if (comp_ctx->aot_frame)
-                    aot_gen_commit_values(comp_ctx->aot_frame);
+                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                    if (comp_ctx->enable_br_checkpoint) {
+                        aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+                    } else {
+                        if (comp_ctx->enable_aux_stack_dirty_bit) {
+                            aot_gen_commit_values(comp_ctx->aot_frame);
+                        }
+                    }
+                }
+
                 read_leb_uint32(frame_ip, frame_ip_end, br_count);
                 if (!(br_depths = wasm_runtime_malloc((uint32)sizeof(uint32)
                                                       * (br_count + 1)))) {
@@ -999,8 +1030,16 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 #if WASM_ENABLE_FAST_INTERP == 0
             case EXT_OP_BR_TABLE_CACHE:
             {
-                if (comp_ctx->aot_frame)
-                    aot_gen_commit_values(comp_ctx->aot_frame);
+                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                    if (comp_ctx->enable_br_checkpoint) {
+                        aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+                    } else {
+                        if (comp_ctx->enable_aux_stack_dirty_bit) {
+                            aot_gen_commit_values(comp_ctx->aot_frame);
+                        }
+                    }
+                }
+
                 BrTableCache *node = bh_list_first_elem(
                     comp_ctx->comp_data->wasm_module->br_table_cache_list);
                 BrTableCache *node_next;
@@ -1035,8 +1074,10 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_CALL:
             {
                 uint8 *frame_ip_org = frame_ip;
-                if (comp_ctx->aot_frame)
+                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                    bh_assert(comp_ctx->aot_frame);
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
+                }
 
                 read_leb_uint32(frame_ip, frame_ip_end, func_idx);
                 if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, false,
@@ -1050,8 +1091,11 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
-                if (comp_ctx->aot_frame)
+                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                    bh_assert(comp_ctx->aot_frame);
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
+                }
+
                 read_leb_uint32(frame_ip, frame_ip_end, type_idx);
 
 #if WASM_ENABLE_REF_TYPES != 0

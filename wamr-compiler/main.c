@@ -453,6 +453,23 @@ main(int argc, char *argv[])
         else if (!strcmp(argv[0], "--enable-dump-call-stack")) {
             option.enable_aux_stack_frame = true;
         }
+        else if (!strcmp(argv[0], "--enable-checkpoint")) {
+            option.enable_aux_stack_frame = true;
+            option.enable_checkpoint = true;
+        }
+        else if (!strcmp(argv[0], "--enable-br-checkpoint")) {
+            option.enable_aux_stack_frame = true;
+            option.enable_checkpoint = true;
+            option.enable_br_checkpoint = true;
+        }
+        else if (!strcmp(argv[0], "--enable-every-checkpoint")) {
+            option.enable_aux_stack_frame = true;
+            option.enable_checkpoint = true;
+            option.enable_every_checkpoint = true;
+        }
+        else if (!strcmp(argv[0], "--enable-aux-stack-dirty-bit")) {
+            option.enable_aux_stack_dirty_bit = true;
+        }
         else if (!strcmp(argv[0], "--enable-perf-profiling")) {
             option.enable_aux_stack_frame = true;
         }
