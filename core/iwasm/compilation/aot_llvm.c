@@ -4,6 +4,7 @@
  */
 
 #include "aot_llvm.h"
+#include "aot_emit_function.h"
 #include "aot_llvm_extra2.h"
 #include "aot_compiler.h"
 #include "aot_emit_exception.h"
@@ -1614,9 +1615,15 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
         goto fail;
     }
 
-    if (comp_ctx->enable_aux_stack_frame
-        && !create_aux_stack_frame(comp_ctx, func_ctx)) {
-        goto fail;
+    if (comp_ctx->enable_aux_stack_frame) {
+        LLVMValueRef func_idx_const;
+        if (!(func_idx_const = I32_CONST(func_index + module->import_function_count)))
+            goto fail;
+        if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx_const))
+            goto fail;
+
+        if (!create_aux_stack_frame(comp_ctx, func_ctx))
+            goto fail;
     }
 
     /* Create local variables */

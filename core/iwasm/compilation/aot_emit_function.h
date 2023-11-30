@@ -31,6 +31,15 @@ bool
 aot_compile_op_ref_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                         uint32 func_idx);
 
+#if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
+bool
+call_aot_alloc_frame_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
+                          LLVMValueRef func_idx);
+bool
+call_aot_free_frame_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx);
+#endif /* end of (WASM_ENABLE_DUMP_CALL_STACK != 0) \
+                 || (WASM_ENABLE_PERF_PROFILING != 0) */
+
 #ifdef __cplusplus
 } /* end of extern "C" */
 #endif

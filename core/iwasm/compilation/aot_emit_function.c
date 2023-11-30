@@ -291,15 +291,12 @@ call_aot_invoke_native_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
 }
 
 #if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
-static bool
+bool
 call_aot_alloc_frame_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                           LLVMValueRef func_idx)
 {
     LLVMValueRef param_values[2], ret_value, value, func;
     LLVMTypeRef param_types[2], ret_type, func_type, func_ptr_type;
-    LLVMBasicBlockRef block_curr = LLVMGetInsertBlock(comp_ctx->builder);
-    LLVMBasicBlockRef frame_alloc_fail, frame_alloc_success;
-    AOTFuncType *aot_func_type = func_ctx->aot_func->func_type;
 
     param_types[0] = comp_ctx->exec_env_type;
     param_types[1] = I32_TYPE;
@@ -320,40 +317,13 @@ call_aot_alloc_frame_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         return false;
     }
 
-    if (!(ret_value = LLVMBuildICmp(comp_ctx->builder, LLVMIntUGT, ret_value,
-                                    I8_ZERO, "frame_alloc_ret"))) {
-        aot_set_last_error("llvm build icmp failed.");
-        return false;
-    }
-
-    ADD_BASIC_BLOCK(frame_alloc_fail, "frame_alloc_fail");
-    ADD_BASIC_BLOCK(frame_alloc_success, "frame_alloc_success");
-
-    LLVMMoveBasicBlockAfter(frame_alloc_fail, block_curr);
-    LLVMMoveBasicBlockAfter(frame_alloc_success, block_curr);
-
-    if (!LLVMBuildCondBr(comp_ctx->builder, ret_value, frame_alloc_success,
-                         frame_alloc_fail)) {
-        aot_set_last_error("llvm build cond br failed.");
-        return false;
-    }
-
-    /* If frame alloc failed, return this function
-        so the runtime can catch the exception */
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, frame_alloc_fail);
-    if (!aot_build_zero_function_ret(comp_ctx, func_ctx, aot_func_type)) {
-        return false;
-    }
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, frame_alloc_success);
-
     return true;
 
 fail:
     return false;
 }
 
-static bool
+bool
 call_aot_free_frame_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
 {
     LLVMValueRef param_values[1], ret_value, value, func;
@@ -582,18 +552,18 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     }
 #endif
 
-#if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
-    if (comp_ctx->enable_aux_stack_frame) {
-        LLVMValueRef func_idx_const;
+// #if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
+//     if (comp_ctx->enable_aux_stack_frame) {
+//         LLVMValueRef func_idx_const;
 
-        if (!(func_idx_const = I32_CONST(func_idx))) {
-            aot_set_last_error("llvm build const failed.");
-            return false;
-        }
-        if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx_const))
-            return false;
-    }
-#endif
+//         if (!(func_idx_const = I32_CONST(func_idx))) {
+//             aot_set_last_error("llvm build const failed.");
+//             return false;
+//         }
+//         if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx_const))
+//             return false;
+//     }
+// #endif
 
     /* Allocate memory for parameters.
      * Parameters layout:
@@ -906,12 +876,12 @@ aot_compile_op_call(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         }
     }
 
-#if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
-    if (comp_ctx->enable_aux_stack_frame) {
-        if (!call_aot_free_frame_func(comp_ctx, func_ctx))
-            goto fail;
-    }
-#endif
+// #if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
+//     if (comp_ctx->enable_aux_stack_frame) {
+//         if (!call_aot_free_frame_func(comp_ctx, func_ctx))
+//             goto fail;
+//     }
+// #endif
 
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Insert suspend check point */
@@ -1383,12 +1353,12 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     }
 #endif
 
-#if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
-    if (comp_ctx->enable_aux_stack_frame) {
-        if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx))
-            goto fail;
-    }
-#endif
+// #if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
+//     if (comp_ctx->enable_aux_stack_frame) {
+//         if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx))
+//             goto fail;
+//     }
+// #endif
 
     /* Add basic blocks */
     block_call_import = LLVMAppendBasicBlockInContext(
@@ -1565,12 +1535,12 @@ aot_compile_op_call_indirect(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         PUSH(result_phis[i], func_type->types[func_param_count + i]);
     }
 
-#if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
-    if (comp_ctx->enable_aux_stack_frame) {
-        if (!call_aot_free_frame_func(comp_ctx, func_ctx))
-            goto fail;
-    }
-#endif
+// #if (WASM_ENABLE_DUMP_CALL_STACK != 0) || (WASM_ENABLE_PERF_PROFILING != 0)
+//     if (comp_ctx->enable_aux_stack_frame) {
+//         if (!call_aot_free_frame_func(comp_ctx, func_ctx))
+//             goto fail;
+//     }
+// #endif
 
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Insert suspend check point */
