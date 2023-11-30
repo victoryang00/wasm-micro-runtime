@@ -298,7 +298,8 @@ handle_next_reachable_block(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         }
     }
     if (block->label_type == LABEL_TYPE_FUNCTION) {
-        call_aot_free_frame_func(comp_ctx, func_ctx);
+        if (comp_ctx->aot_frame)
+            call_aot_free_frame_func(comp_ctx, func_ctx);
         if (block->result_count) {
             /* Return the first return value */
             if (!(ret =
@@ -1250,7 +1251,8 @@ aot_compile_op_return(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         (*p_frame_ip - 1) - comp_ctx->comp_data->wasm_module->buf_code);
 #endif
 
-    call_aot_free_frame_func(comp_ctx, func_ctx);
+    if (comp_ctx->aot_frame)
+        call_aot_free_frame_func(comp_ctx, func_ctx);
     if (block_func->result_count) {
         /* Store extra result values to function parameters */
         for (i = 0; i < block_func->result_count - 1; i++) {
