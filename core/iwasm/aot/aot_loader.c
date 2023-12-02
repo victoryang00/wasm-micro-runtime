@@ -89,9 +89,9 @@ check_buf(const uint8 *buf, const uint8 *buf_end, uint32 length,
           char *error_buf, uint32 error_buf_size)
 {
     // if ((uintptr_t)buf + length < (uintptr_t)buf
-    //     || (uintptr_t)buf + length > (uintptr_t)buf_end) {
-    //     set_error_buf(error_buf, error_buf_size, "unexpect end");
-    //     return false;
+        //     || (uintptr_t)buf + length > (uintptr_t)buf_end) {
+        //     set_error_buf(error_buf, error_buf_size, "unexpect end");
+        //     return false;
     // }
     return true;
 }
@@ -694,7 +694,7 @@ load_name_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
 
     read_uint32(p, p_end, name_len);
 
-    p += name_len;
+        p += name_len;
 
     while (p < p_end) {
         read_uint32(p, p_end, name_type);
@@ -762,8 +762,10 @@ load_name_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
                         previous_func_index = func_index;
                         *(aux_func_indexes + name_index) = func_index;
                         read_string(p, p_end, *(aux_func_names + name_index));
+#if 0
                         LOG_DEBUG("func_index %u -> aux_func_name = %s\n",
                                func_index, *(aux_func_names + name_index));
+#endif
                     }
                 }
                 break;
@@ -813,6 +815,11 @@ load_custom_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
         {
             const char *section_name;
             WASMCustomSection *section;
+
+            if (p >= p_end) {
+                set_error_buf(error_buf, error_buf_size, "unexpected end");
+                goto fail;
+            }
 
             read_string(p, p_end, section_name);
 
@@ -1074,6 +1081,7 @@ load_table_init_data_list(const uint8 **p_buf, const uint8 *buf_end,
 
         data_list[i]->mode = mode;
         data_list[i]->elem_type = elem_type;
+        data_list[i]->is_dropped = false;
         data_list[i]->table_index = table_index;
         data_list[i]->offset.init_expr_type = (uint8)init_expr_type;
         data_list[i]->offset.u.i64 = (int64)init_expr_value;
@@ -1552,9 +1560,8 @@ load_object_data_sections(const uint8 **p_buf, const uint8 *buf_end,
 
         /* Allocate memory for data */
         if (data_sections[i].size > 0
-            && !(data_sections[i].data =
-                     os_mmap(NULL, data_sections[i].size, map_prot, map_flags,
-                             os_get_invalid_handle()))) {
+            && !(data_sections[i].data = os_mmap(NULL, data_sections[i].size,
+                                                 map_prot, map_flags))) {
             set_error_buf(error_buf, error_buf_size, "allocate memory failed");
             return false;
         }
@@ -2477,8 +2484,7 @@ load_relocation_section(const uint8 *buf, const uint8 *buf_end,
 
         if (size > UINT32_MAX
             || !(module->extra_plt_data =
-                     os_mmap(NULL, (uint32)size, map_prot, map_flags,
-                             os_get_invalid_handle()))) {
+                     os_mmap(NULL, (uint32)size, map_prot, map_flags))) {
             set_error_buf(error_buf, error_buf_size, "mmap memory failed");
             goto fail;
         }
@@ -2601,8 +2607,7 @@ load_relocation_section(const uint8 *buf, const uint8 *buf_end,
         size = (uint64)sizeof(void *) * got_item_count;
         if (size > UINT32_MAX
             || !(module->got_func_ptrs =
-                     os_mmap(NULL, (uint32)size, map_prot, map_flags,
-                             os_get_invalid_handle()))) {
+                     os_mmap(NULL, (uint32)size, map_prot, map_flags))) {
             set_error_buf(error_buf, error_buf_size, "mmap memory failed");
             goto fail;
         }
@@ -3115,9 +3120,8 @@ create_sections(AOTModule *module, const uint8 *buf, uint32 size,
                         (uint64)section_size + aot_get_plt_table_size();
                     total_size = (total_size + 3) & ~((uint64)3);
                     if (total_size >= UINT32_MAX
-                        || !(aot_text =
-                                 os_mmap(NULL, (uint32)total_size, map_prot,
-                                         map_flags, os_get_invalid_handle()))) {
+                        || !(aot_text = os_mmap(NULL, (uint32)total_size,
+                                                map_prot, map_flags))) {
                         wasm_runtime_free(section);
                         set_error_buf(error_buf, error_buf_size,
                                       "mmap memory failed");

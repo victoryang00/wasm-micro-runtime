@@ -482,13 +482,11 @@ read_leb(const uint8 *buf, uint32 *p_offset, uint32 maxbits, bool sign)
 #define GET_OPCODE() (void)0
 #endif
 
-#define DEF_OP_I_CONST(ctype, src_op_type)                              \
-    do {                                                                \
-        ctype cval;                                                     \
-        read_leb_##ctype(frame_ip, frame_ip_end, cval);                 \
-        PUSH_##src_op_type(cval);                                       \
-        LOG_DEBUG("i32.const %d %d %ld", cval, *frame_sp,               \
-                  ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom); \
+#define DEF_OP_I_CONST(ctype, src_op_type)              \
+    do {                                                \
+        ctype cval;                                     \
+        read_leb_##ctype(frame_ip, frame_ip_end, cval); \
+        PUSH_##src_op_type(cval);                       \
     } while (0)
 
 #define DEF_OP_EQZ(src_op_type)             \
@@ -1022,8 +1020,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     }
 
     /* - module_inst */
-    wasm_exec_env_set_module_inst(exec_env,
-                                  (WASMModuleInstanceCommon *)sub_module_inst);
+    exec_env->module_inst = (WASMModuleInstanceCommon *)sub_module_inst;
     /* - aux_stack_boundary */
     aux_stack_origin_boundary = exec_env->aux_stack_boundary.boundary;
     exec_env->aux_stack_boundary.boundary =
@@ -1045,54 +1042,56 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     prev_frame->ip = ip;
     exec_env->aux_stack_boundary.boundary = aux_stack_origin_boundary;
     exec_env->aux_stack_bottom.bottom = aux_stack_origin_bottom;
-    wasm_exec_env_restore_module_inst(exec_env,
-                                      (WASMModuleInstanceCommon *)module_inst);
+    exec_env->module_inst = (WASMModuleInstanceCommon *)module_inst;
+
+    /* transfer exception if it is thrown */
+    if (wasm_copy_exception(sub_module_inst, NULL)) {
+        bh_memcpy_s(module_inst->cur_exception,
+                    sizeof(module_inst->cur_exception),
+                    sub_module_inst->cur_exception,
+                    sizeof(sub_module_inst->cur_exception));
+    }
 }
 #endif
 
 #if WASM_ENABLE_THREAD_MGR != 0
 #if WASM_ENABLE_DEBUG_INTERP != 0
-#define CHECK_SUSPEND_FLAGS()                                          \
-    do {                                                               \
-        os_mutex_lock(&exec_env->wait_lock);                           \
-        if (IS_WAMR_TERM_SIG(exec_env->current_status->signal_flag)) { \
-            os_mutex_unlock(&exec_env->wait_lock);                     \
-            return;                                                    \
-        }                                                              \
-        if (IS_WAMR_STOP_SIG(exec_env->current_status->signal_flag)) { \
-            SYNC_ALL_TO_FRAME();                                       \
-            wasm_cluster_thread_waiting_run(exec_env);                 \
-        }                                                              \
-        os_mutex_unlock(&exec_env->wait_lock);                         \
-    } while (0)
-#else
-#if WASM_SUSPEND_FLAGS_IS_ATOMIC != 0
-/* The lock is only needed when the suspend_flags is atomic; otherwise
-   the lock is already taken at the time when SUSPENSION_LOCK() is called. */
-#define SUSPENSION_LOCK() os_mutex_lock(&exec_env->wait_lock);
-#define SUSPENSION_UNLOCK() os_mutex_unlock(&exec_env->wait_lock);
-#else
-#define SUSPENSION_LOCK()
-#define SUSPENSION_UNLOCK()
-#endif
-
 #define CHECK_SUSPEND_FLAGS()                                         \
     do {                                                              \
-        WASM_SUSPEND_FLAGS_LOCK(exec_env->wait_lock);                 \
-        if (WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags)           \
-            & WASM_SUSPEND_FLAG_TERMINATE) {                          \
-            /* terminate current thread */                            \
-            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->wait_lock);           \
+        os_mutex_lock(&exec_env->wait_lock);                          \
+        if (IS_WAMR_TERM_SIG(exec_env->current_status.signal_flag)) { \
+            os_mutex_unlock(&exec_env->wait_lock);                    \
             return;                                                   \
         }                                                             \
-        while (WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags)        \
-               & WASM_SUSPEND_FLAG_SUSPEND) {                         \
-            /* suspend current thread */                              \
-            SUSPENSION_LOCK()                                         \
-            os_cond_wait(&exec_env->wait_cond, &exec_env->wait_lock); \
-            SUSPENSION_UNLOCK()                                       \
+        if (IS_WAMR_STOP_SIG(exec_env->current_status.signal_flag)) { \
+            SYNC_ALL_TO_FRAME();                                      \
+            wasm_cluster_thread_waiting_run(exec_env);                \
         }                                                             \
-        WASM_SUSPEND_FLAGS_UNLOCK(exec_env->wait_lock);               \
+        os_mutex_unlock(&exec_env->wait_lock);                        \
+    } while (0)
+#else
+#define CHECK_SUSPEND_FLAGS()                                                \
+    do {                                                                     \
+        uint32 suspend_flags, suspend_count;                                 \
+        WASM_SUSPEND_FLAGS_LOCK(exec_env->cluster->thread_state_lock);       \
+        suspend_flags = WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags);     \
+        if (suspend_flags != 0) {                                            \
+            suspend_count = exec_env->suspend_count;                         \
+            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->cluster->thread_state_lock); \
+            if (suspend_flags & WASM_SUSPEND_FLAG_TERMINATE) {               \
+                /* terminate current thread */                               \
+                return;                                                      \
+            }                                                                \
+            if (suspend_count > 0) {                                         \
+                SYNC_ALL_TO_FRAME();                                         \
+                wasm_thread_change_to_running(exec_env);                     \
+                if (wasm_copy_exception(module, NULL))                       \
+                    goto got_exception;                                      \
+            }                                                                \
+        }                                                                    \
+        else {                                                               \
+            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->cluster->thread_state_lock); \
+        }                                                                    \
     } while (0)
 #endif /* WASM_ENABLE_DEBUG_INTERP */
 #endif /* WASM_ENABLE_THREAD_MGR */
@@ -1109,9 +1108,9 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
            debugger can know the exact opcode who caused the exception */ \
         frame_ip_orig = frame_ip;                                         \
         os_mutex_lock(&exec_env->wait_lock);                              \
-        while (exec_env->current_status->signal_flag == WAMR_SIG_SINGSTEP \
-               && exec_env->current_status->step_count++ == 1) {          \
-            exec_env->current_status->step_count = 0;                     \
+        while (exec_env->current_status.signal_flag == WAMR_SIG_SINGSTEP  \
+               && exec_env->current_status.step_count++ == 1) {           \
+            exec_env->current_status.step_count = 0;                      \
             SYNC_ALL_TO_FRAME();                                          \
             wasm_cluster_thread_waiting_run(exec_env);                    \
         }                                                                 \

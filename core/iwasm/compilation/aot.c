@@ -129,6 +129,7 @@ aot_create_table_init_data_list(const WASMModule *module)
         data_list[i]->mode = module->table_segments[i].mode;
         data_list[i]->elem_type = module->table_segments[i].elem_type;
         /* runtime control it */
+        data_list[i]->is_dropped = false;
         data_list[i]->table_index = module->table_segments[i].table_index;
         bh_memcpy_s(&data_list[i]->offset, sizeof(AOTInitExpr),
                     &module->table_segments[i].base_offset,
@@ -354,7 +355,6 @@ aot_create_funcs(const WASMModule *module)
         funcs[i]->local_types = func->local_types;
         funcs[i]->param_cell_num = func->param_cell_num;
         funcs[i]->local_cell_num = func->local_cell_num;
-        funcs[i]->max_stack_cell_num = func->max_stack_cell_num;
         funcs[i]->code = func->code;
         funcs[i]->code_size = func->code_size;
     }

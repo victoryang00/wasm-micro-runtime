@@ -30,16 +30,7 @@
     wasm_runtime_module_free(module_inst, offset)
 /* clang-format on */
 
-// uvwasi_errno_t is typedef'd to uint16 which is correct according to the ABI
-// specification. However, in WASM, the smallest integer type is int32. If we
-// return uint16, we would rely on language SDKs to implement the correct
-// behaviour of casting to uint16 before checking the value or using it any way.
-// Failure to do so can cause tricky bugs as the upper 16 bits of the error
-// result are not guaranteed to be zero'ed by us so the result essentially
-// contains garbage from the WASM app perspective. To prevent this, we return
-// uint32 directly instead so as not to be reliant on the correct behaviour of
-// any current/future SDK implementations.
-#define wasi_errno_t uint32_t
+#define wasi_errno_t uvwasi_errno_t
 #define wasi_fd_t uvwasi_fd_t
 #define wasi_clockid_t uvwasi_clockid_t
 #define wasi_timestamp_t uvwasi_timestamp_t
@@ -77,6 +68,14 @@ typedef struct iovec_app {
     uint32 buf_offset;
     uint32 buf_len;
 } iovec_app_t;
+
+typedef struct WASIContext {
+    uvwasi_t uvwasi;
+    uint32_t exit_code;
+} WASIContext;
+
+void *
+wasm_runtime_get_wasi_ctx(wasm_module_inst_t module_inst);
 
 static uvwasi_t *
 get_wasi_ctx(wasm_module_inst_t module_inst)

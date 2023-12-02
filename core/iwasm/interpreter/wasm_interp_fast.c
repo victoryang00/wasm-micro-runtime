@@ -13,6 +13,9 @@
 #if WASM_ENABLE_SHARED_MEMORY != 0
 #include "../common/wasm_shared_memory.h"
 #endif
+#if WASM_ENABLE_THREAD_MGR != 0
+#include "../libraries/thread-mgr/thread_manager.h"
+#endif
 
 typedef int32 CellType_I32;
 typedef int64 CellType_I64;
@@ -1031,8 +1034,7 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     }
 
     /* - module_inst */
-    wasm_exec_env_set_module_inst(exec_env,
-                                  (WASMModuleInstanceCommon *)sub_module_inst);
+    exec_env->module_inst = (WASMModuleInstanceCommon *)sub_module_inst;
     /* - aux_stack_boundary */
     aux_stack_origin_boundary = exec_env->aux_stack_boundary.boundary;
     exec_env->aux_stack_boundary.boundary =
@@ -1054,23 +1056,41 @@ wasm_interp_call_func_import(WASMModuleInstance *module_inst,
     prev_frame->ip = ip;
     exec_env->aux_stack_boundary.boundary = aux_stack_origin_boundary;
     exec_env->aux_stack_bottom.bottom = aux_stack_origin_bottom;
-    wasm_exec_env_restore_module_inst(exec_env,
-                                      (WASMModuleInstanceCommon *)module_inst);
+    exec_env->module_inst = (WASMModuleInstanceCommon *)module_inst;
+
+    /* transfer exception if it is thrown */
+    if (wasm_copy_exception(sub_module_inst, NULL)) {
+        bh_memcpy_s(module_inst->cur_exception,
+                    sizeof(module_inst->cur_exception),
+                    sub_module_inst->cur_exception,
+                    sizeof(sub_module_inst->cur_exception));
+    }
 }
 #endif
 
 #if WASM_ENABLE_THREAD_MGR != 0
-#define CHECK_SUSPEND_FLAGS()                               \
-    do {                                                    \
-        WASM_SUSPEND_FLAGS_LOCK(exec_env->wait_lock);       \
-        if (WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags) \
-            & WASM_SUSPEND_FLAG_TERMINATE) {                \
-            /* terminate current thread */                  \
-            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->wait_lock); \
-            return;                                         \
-        }                                                   \
-        /* TODO: support suspend and breakpoint */          \
-        WASM_SUSPEND_FLAGS_UNLOCK(exec_env->wait_lock);     \
+#define CHECK_SUSPEND_FLAGS()                                                \
+    do {                                                                     \
+        uint32 suspend_flags, suspend_count;                                 \
+        WASM_SUSPEND_FLAGS_LOCK(exec_env->cluster->thread_state_lock);       \
+        suspend_flags = WASM_SUSPEND_FLAGS_GET(exec_env->suspend_flags);     \
+        if (suspend_flags != 0) {                                            \
+            suspend_count = exec_env->suspend_count;                         \
+            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->cluster->thread_state_lock); \
+            if (suspend_flags & WASM_SUSPEND_FLAG_TERMINATE) {               \
+                /* terminate current thread */                               \
+                return;                                                      \
+            }                                                                \
+            if (suspend_count > 0) {                                         \
+                SYNC_ALL_TO_FRAME();                                         \
+                wasm_thread_change_to_running(exec_env);                     \
+                if (wasm_copy_exception(module, NULL))                       \
+                    goto got_exception;                                      \
+            }                                                                \
+        }                                                                    \
+        else {                                                               \
+            WASM_SUSPEND_FLAGS_UNLOCK(exec_env->cluster->thread_state_lock); \
+        }                                                                    \
     } while (0)
 #endif
 
@@ -1122,27 +1142,12 @@ wasm_interp_dump_op_count()
         goto *p_label_addr;                            \
     } while (0)
 #else
-#if UINTPTR_MAX == UINT64_MAX
-#define FETCH_OPCODE_AND_DISPATCH()                                       \
-    do {                                                                  \
-        const void *p_label_addr;                                         \
-        bh_assert(((uintptr_t)frame_ip & 1) == 0);                        \
-        /* int32 relative offset was emitted in 64-bit target */          \
-        p_label_addr = label_base + (int32)LOAD_U32_WITH_2U16S(frame_ip); \
-        frame_ip += sizeof(int32);                                        \
-        goto *p_label_addr;                                               \
+#define FETCH_OPCODE_AND_DISPATCH()                                 \
+    do {                                                            \
+        const void *p_label_addr = label_base + *(int16 *)frame_ip; \
+        frame_ip += sizeof(int16);                                  \
+        goto *p_label_addr;                                         \
     } while (0)
-#else
-#define FETCH_OPCODE_AND_DISPATCH()                                      \
-    do {                                                                 \
-        const void *p_label_addr;                                        \
-        bh_assert(((uintptr_t)frame_ip & 1) == 0);                       \
-        /* uint32 label address was emitted in 32-bit target */          \
-        p_label_addr = (void *)(uintptr_t)LOAD_U32_WITH_2U16S(frame_ip); \
-        frame_ip += sizeof(int32);                                       \
-        goto *p_label_addr;                                              \
-    } while (0)
-#endif
 #endif /* end of WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS */
 #define HANDLE_OP_END() FETCH_OPCODE_AND_DISPATCH()
 
@@ -1192,7 +1197,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     register uint8 *frame_ip = &opcode_IMPDEP; /* cache of frame->ip */
     register uint32 *frame_lp = NULL;          /* cache of frame->lp */
 #if WASM_ENABLE_LABELS_AS_VALUES != 0
-#if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0 && UINTPTR_MAX == UINT64_MAX
+#if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
     /* cache of label base addr */
     register uint8 *label_base = &&HANDLE_WASM_OP_UNREACHABLE;
 #endif
@@ -1207,7 +1212,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 opcode, local_type, *global_addr;
 #if !defined(OS_ENABLE_HW_BOUND_CHECK) \
     || WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
-#if WASM_CONFIGURABLE_BOUNDS_CHECKS != 0
+#if WASM_CONFIGUABLE_BOUNDS_CHECKS != 0
     bool disable_bounds_checks = !wasm_runtime_is_bounds_checks_enabled(
         (WASMModuleInstanceCommon *)module);
 #else
@@ -2989,8 +2994,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 
                         segment = read_uint32(frame_ip);
 
-                        bytes = (uint64)(uint32)POP_I32();
-                        offset = (uint64)(uint32)POP_I32();
+                        bytes = (uint64)POP_I32();
+                        offset = (uint64)POP_I32();
                         addr = POP_I32();
 
 #if WASM_ENABLE_THREAD_MGR
@@ -3005,18 +3010,10 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                             goto out_of_bounds;
                         maddr = memory->memory_data + (uint32)addr;
 #endif
-                        if (bh_bitmap_get_bit(module->e->common.data_dropped,
-                                              segment)) {
-                            seg_len = 0;
-                            data = NULL;
-                        }
-                        else {
 
-                            seg_len =
-                                (uint64)module->module->data_segments[segment]
-                                    ->data_length;
-                            data = module->module->data_segments[segment]->data;
-                        }
+                        seg_len = (uint64)module->module->data_segments[segment]
+                                      ->data_length;
+                        data = module->module->data_segments[segment]->data;
                         if (offset + bytes > seg_len)
                             goto out_of_bounds;
 
@@ -3029,8 +3026,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         uint32 segment;
 
                         segment = read_uint32(frame_ip);
-                        bh_bitmap_set_bit(module->e->common.data_dropped,
-                                          segment);
+
+                        module->module->data_segments[segment]->data_length = 0;
                         break;
                     }
                     case WASM_OP_MEMORY_COPY:
@@ -3122,8 +3119,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                             break;
                         }
 
-                        if (bh_bitmap_get_bit(module->e->common.elem_dropped,
-                                              elem_idx)) {
+                        if (module->module->table_segments[elem_idx]
+                                .is_dropped) {
                             wasm_set_exception(module,
                                                "out of bounds table access");
                             goto got_exception;
@@ -3152,8 +3149,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     {
                         uint32 elem_idx = read_uint32(frame_ip);
                         bh_assert(elem_idx < module->module->table_seg_count);
-                        bh_bitmap_set_bit(module->e->common.elem_dropped,
-                                          elem_idx);
+
+                        module->module->table_segments[elem_idx].is_dropped =
+                            true;
                         break;
                     }
                     case WASM_OP_TABLE_COPY:

@@ -5,6 +5,7 @@
 
 #include "aot_runtime.h"
 #include "bh_log.h"
+#include "bh_bitmap.h"
 #include "mem_alloc.h"
 #include "../common/wasm_runtime_common.h"
 #include "../common/wasm_memory.h"
@@ -617,7 +618,6 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
 
 #if WASM_ENABLE_SHARED_MEMORY != 0
     if (is_shared_memory) {
-        memory_inst->is_shared_memory = 1;
         memory_inst->ref_count = 1;
     }
 #endif
@@ -2022,13 +2022,6 @@ aot_module_free_internal(AOTModuleInstance *module_inst, WASMExecEnv *exec_env,
 
     if (ptr) {
         uint8 *addr = memory_inst->memory_data + ptr;
-        uint8 *memory_data_end;
-
-        /* memory->memory_data_end may be changed in memory grow */
-        SHARED_MEMORY_LOCK(memory_inst);
-        memory_data_end = memory_inst->memory_data_end;
-        SHARED_MEMORY_UNLOCK(memory_inst);
-
         if (memory_inst->heap_handle && memory_inst->heap_data < addr
             && addr < memory_inst->heap_data_end) {
             mem_allocator_free(memory_inst->heap_handle, addr);
@@ -2036,7 +2029,7 @@ aot_module_free_internal(AOTModuleInstance *module_inst, WASMExecEnv *exec_env,
         else if (module->malloc_func_index != (uint32)-1
                  && module->free_func_index != (uint32)-1
                  && memory_inst->memory_data <= addr
-                 && addr < memory_data_end) {
+                 && addr < memory_inst->memory_data_end) {
             AOTFunctionInstance *free_func;
             char *free_func_name;
 
@@ -2421,10 +2414,10 @@ aot_memory_init(AOTModuleInstance *module_inst, uint32 seg_index, uint32 offset,
         data = NULL;
     }
     else {
-        aot_module = (AOTModule *)module_inst->module;
-        seg_len = aot_module->mem_init_data_list[seg_index]->byte_count;
-        data = aot_module->mem_init_data_list[seg_index]->bytes;
-    }
+    aot_module = (AOTModule *)module_inst->module;
+    seg_len = aot_module->mem_init_data_list[seg_index]->byte_count;
+    data = aot_module->mem_init_data_list[seg_index]->bytes;
+}
 
     if (!wasm_runtime_validate_app_addr((WASMModuleInstanceCommon *)module_inst,
                                         dst, len))
@@ -2438,9 +2431,7 @@ aot_memory_init(AOTModuleInstance *module_inst, uint32 seg_index, uint32 offset,
     maddr = wasm_runtime_addr_app_to_native(
         (WASMModuleInstanceCommon *)module_inst, dst);
 
-    SHARED_MEMORY_LOCK(memory_inst);
     bh_memcpy_s(maddr, memory_inst->memory_data_size - dst, data + offset, len);
-    SHARED_MEMORY_UNLOCK(memory_inst);
     return true;
 }
 
@@ -2692,7 +2683,7 @@ aot_table_init(AOTModuleInstance *module_inst, uint32 tbl_idx,
         return;
     }
 
-    if (bh_bitmap_get_bit(
+if (bh_bitmap_get_bit(
             ((AOTModuleInstanceExtra *)module_inst->e)->common.elem_dropped,
             tbl_seg_idx)) {
         aot_set_exception_with_id(module_inst, EXCE_OUT_OF_BOUNDS_TABLE_ACCESS);

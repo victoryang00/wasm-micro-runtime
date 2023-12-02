@@ -2573,9 +2573,7 @@ wasm_module_free_internal(WASMModuleInstance *module_inst,
         uint8 *memory_data_end;
 
         /* memory->memory_data_end may be changed in memory grow */
-        SHARED_MEMORY_LOCK(memory);
         memory_data_end = memory->memory_data_end;
-        SHARED_MEMORY_UNLOCK(memory);
 
         if (memory->heap_handle && memory->heap_data <= addr
             && addr < memory->heap_data_end) {

@@ -155,6 +155,17 @@ os_mutex_lock(korp_mutex *mutex)
 }
 
 int
+os_mutex_trylock(korp_mutex *mutex)
+{
+    int ret;
+
+    assert(mutex);
+    ret = pthread_mutex_trylock(mutex);
+
+    return ret == 0 ? BHT_OK : BHT_ERROR;
+}
+
+int
 os_mutex_unlock(korp_mutex *mutex)
 {
     int ret;
@@ -330,61 +341,6 @@ os_cond_broadcast(korp_cond *cond)
 }
 
 int
-os_rwlock_init(korp_rwlock *lock)
-{
-    assert(lock);
-
-    if (pthread_rwlock_init(lock, NULL) != BHT_OK)
-        return BHT_ERROR;
-
-    return BHT_OK;
-}
-
-int
-os_rwlock_rdlock(korp_rwlock *lock)
-{
-    assert(lock);
-
-    if (pthread_rwlock_rdlock(lock) != BHT_OK)
-        return BHT_ERROR;
-
-    return BHT_OK;
-}
-
-int
-os_rwlock_wrlock(korp_rwlock *lock)
-{
-    assert(lock);
-
-    if (pthread_rwlock_wrlock(lock) != BHT_OK)
-        return BHT_ERROR;
-
-    return BHT_OK;
-}
-
-int
-os_rwlock_unlock(korp_rwlock *lock)
-{
-    assert(lock);
-
-    if (pthread_rwlock_unlock(lock) != BHT_OK)
-        return BHT_ERROR;
-
-    return BHT_OK;
-}
-
-int
-os_rwlock_destroy(korp_rwlock *lock)
-{
-    assert(lock);
-
-    if (pthread_rwlock_destroy(lock) != BHT_OK)
-        return BHT_ERROR;
-
-    return BHT_OK;
-}
-
-int
 os_thread_join(korp_tid thread, void **value_ptr)
 {
     return pthread_join(thread, value_ptr);
@@ -496,14 +452,8 @@ static os_thread_local_attribute bool thread_signal_inited = false;
 /* The signal alternate stack base addr */
 static os_thread_local_attribute uint8 *sigalt_stack_base_addr;
 
-/*
- * ASAN is not designed to work with custom stack unwind or other low-level
- * things. Ignore a function that does some low-level magic. (e.g. walking
- * through the thread's stack bypassing the frame boundaries)
- */
 #if defined(__clang__)
 #pragma clang optimize off
-__attribute__((no_sanitize_address))
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC optimize("O0")
@@ -564,12 +514,10 @@ destroy_stack_guard_pages()
 }
 #endif /* end of WASM_DISABLE_STACK_HW_BOUND_CHECK == 0 */
 
-/*
- * ASAN is not designed to work with custom stack unwind or other low-level
- * things. Ignore a function that does some low-level magic. (e.g. walking
- * through the thread's stack bypassing the frame boundaries)
- */
-#if defined(__GNUC__) || defined(__clang__)
+/* ASAN is not designed to work with custom stack unwind or other low-level \
+ things. > Ignore a function that does some low-level magic. (e.g. walking \
+ through the thread's stack bypassing the frame boundaries) */
+#if defined(__GNUC__)
 __attribute__((no_sanitize_address))
 #endif
 static void
@@ -586,12 +534,10 @@ mask_signals(int how)
 static struct sigaction prev_sig_act_SIGSEGV;
 static struct sigaction prev_sig_act_SIGBUS;
 
-/*
- * ASAN is not designed to work with custom stack unwind or other low-level
- * things. Ignore a function that does some low-level magic. (e.g. walking
- * through the thread's stack bypassing the frame boundaries)
- */
-#if defined(__GNUC__) || defined(__clang__)
+/* ASAN is not designed to work with custom stack unwind or other low-level \
+ things. > Ignore a function that does some low-level magic. (e.g. walking \
+ through the thread's stack bypassing the frame boundaries) */
+#if defined(__GNUC__)
 __attribute__((no_sanitize_address))
 #endif
 static void
@@ -664,7 +610,7 @@ os_thread_signal_init(os_signal_handler handler)
 
     /* Initialize memory for signal alternate stack of current thread */
     if (!(map_addr = os_mmap(NULL, map_size, MMAP_PROT_READ | MMAP_PROT_WRITE,
-                             MMAP_MAP_NONE, os_get_invalid_handle()))) {
+                             MMAP_MAP_NONE))) {
         os_printf("Failed to mmap memory for alternate stack\n");
         goto fail1;
     }
