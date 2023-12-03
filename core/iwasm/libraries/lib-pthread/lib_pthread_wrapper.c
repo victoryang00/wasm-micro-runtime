@@ -626,7 +626,9 @@ pthread_create_wrapper(wasm_exec_env_t exec_env,
 
     if (thread)
         *thread = thread_handle;
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    register_sigtrap();
+#endif
     return 0;
 
 fail:
@@ -650,6 +652,9 @@ pthread_join_wrapper(wasm_exec_env_t exec_env, uint32 thread,
     wasm_module_inst_t module_inst;
     wasm_exec_env_t target_exec_env;
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    serialize_to_file(exec_env);
+#endif
     module_inst = get_module_inst(exec_env);
 
     /* validate addr, we can use current thread's
