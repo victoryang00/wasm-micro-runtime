@@ -56,6 +56,7 @@ typedef struct AOTCompOption {
     bool enable_checkpoint;
     bool enable_br_checkpoint;
     bool enable_every_checkpoint;
+    bool enable_restore;
     bool enable_aux_stack_dirty_bit;
     bool disable_llvm_intrinsics;
     bool disable_llvm_lto;

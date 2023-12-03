@@ -757,49 +757,52 @@ aot_gen_checkpoint(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     if (!aot_gen_commit_values(comp_ctx->aot_frame))
         return false;
 
-    char name[32];
-    LLVMBasicBlockRef block_restore_jump, block_restore_value;
+    if (comp_ctx->enable_restore) {
+        char name[32];
+        LLVMBasicBlockRef block_restore_jump, block_restore_value;
 
-    snprintf(name, sizeof(name), "restore-%zu",
-             (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    if (!(block_restore_value = LLVMAppendBasicBlockInContext(
-              comp_ctx->context, func_ctx->func, name))) {
-        aot_set_last_error("add LLVM basic block failed.");
-        return false;
+        snprintf(name, sizeof(name), "restore-%zu",
+                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        if (!(block_restore_value = LLVMAppendBasicBlockInContext(
+                comp_ctx->context, func_ctx->func, name))) {
+            aot_set_last_error("add LLVM basic block failed.");
+            return false;
+        }
+
+        snprintf(name, sizeof(name), "restore-jump-%zu",
+                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        if (!(block_restore_jump = LLVMAppendBasicBlockInContext(
+                comp_ctx->context, func_ctx->func, name))) {
+            aot_set_last_error("add LLVM basic block failed.");
+            return false;
+        }
+
+        LLVMMoveBasicBlockAfter(block_restore_value,
+                                LLVMGetInsertBlock(comp_ctx->builder));
+        LLVMMoveBasicBlockAfter(block_restore_jump, block_restore_value);
+
+        if (!LLVMBuildBr(comp_ctx->builder, block_restore_jump)) {
+            aot_set_last_error("llvm build br failed.");
+            return false;
+        }
+
+        LLVMValueRef ip_offset;
+        if (comp_ctx->pointer_size == sizeof(uint64))
+            ip_offset =
+                I64_CONST((uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        else
+            ip_offset =
+                I32_CONST((uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        LLVMAddCase(func_ctx->restore_switch, ip_offset, block_restore_value);
+
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_value);
+        if (!aot_gen_restore_values(comp_ctx->aot_frame))
+            return false;
+        LLVMBuildBr(comp_ctx->builder, block_restore_jump);
+
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_jump);
     }
 
-    snprintf(name, sizeof(name), "restore-jump-%zu",
-             (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    if (!(block_restore_jump = LLVMAppendBasicBlockInContext(
-              comp_ctx->context, func_ctx->func, name))) {
-        aot_set_last_error("add LLVM basic block failed.");
-        return false;
-    }
-
-    LLVMMoveBasicBlockAfter(block_restore_value,
-                            LLVMGetInsertBlock(comp_ctx->builder));
-    LLVMMoveBasicBlockAfter(block_restore_jump, block_restore_value);
-
-    if (!LLVMBuildBr(comp_ctx->builder, block_restore_jump)) {
-        aot_set_last_error("llvm build br failed.");
-        return false;
-    }
-
-    LLVMValueRef ip_offset;
-    if (comp_ctx->pointer_size == sizeof(uint64))
-        ip_offset =
-            I64_CONST((uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    else
-        ip_offset =
-            I32_CONST((uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    LLVMAddCase(func_ctx->restore_switch, ip_offset, block_restore_value);
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_value);
-    if (!aot_gen_restore_values(comp_ctx->aot_frame))
-        return false;
-    LLVMBuildBr(comp_ctx->builder, block_restore_jump);
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_jump);
     if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))
         return false;
 
@@ -837,61 +840,73 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         }
     }
 
+    {
+        LLVMBasicBlockRef block_first = LLVMGetFirstBasicBlock(func_ctx->func);
+        LLVMPositionBuilderBefore(comp_ctx->aot_frame_alloca_builder, LLVMGetFirstInstruction(block_first));
+    }
+
+
     /* Start to translate the opcodes */
     LLVMPositionBuilderAtEnd(
         comp_ctx->builder,
         func_ctx->block_stack.block_list_head->llvm_entry_block);
 
-    {
-        if (comp_ctx->aot_frame) {
-            uint32 offset_ip = offsetof(AOTFrame, ip_offset);
-            LLVMValueRef cur_frame = func_ctx->cur_frame;
-            LLVMValueRef value_offset, value_addr, value_ptr, value;
-            bool is_64bit =
-                (comp_ctx->pointer_size == sizeof(uint64)) ? true : false;
-            if (!(value_offset = I32_CONST(offset_ip))) {
-                aot_set_last_error("llvm build const failed");
-                return false;
-            }
-
-            if (!(value_addr = LLVMBuildInBoundsGEP2(
-                      comp_ctx->builder, INT8_TYPE, cur_frame, &value_offset, 1,
-                      "ip_addr"))) {
-                aot_set_last_error("llvm build in bounds gep failed");
-                return false;
-            }
-
-            if (!(value_ptr = LLVMBuildBitCast(
-                      comp_ctx->builder, value_addr,
-                      is_64bit ? INT64_PTR_TYPE : INT32_PTR_TYPE, "ip_ptr"))) {
-                aot_set_last_error("llvm build bit cast failed");
-                return false;
-            }
-
-            if (!(value = LLVMBuildLoad2(comp_ctx->builder,
-                                         is_64bit ? I64_TYPE : I32_TYPE,
-                                         value_ptr, "init_ip"))) {
-                aot_set_last_error("llvm build load failed");
-                return false;
-            }
-
-            LLVMBasicBlockRef normal_block;
-            char name[32];
-            snprintf(name, sizeof(name), "restore-no_restore");
-            if (!(normal_block = LLVMAppendBasicBlockInContext(
-                      comp_ctx->context, func_ctx->func, name))) {
-                aot_set_last_error("add LLVM basic block failed.");
-                goto fail;
-            }
-            LLVMMoveBasicBlockAfter(normal_block,
-                                    LLVMGetInsertBlock(comp_ctx->builder));
-            func_ctx->restore_switch =
-                LLVMBuildSwitch(comp_ctx->builder, value, normal_block, 0);
-            LLVMPositionBuilderAtEnd(comp_ctx->builder, normal_block);
-
-            LLVMPositionBuilderBefore(comp_ctx->aot_frame_alloca_builder,
-                                      func_ctx->restore_switch);
+    if (comp_ctx->enable_restore) {
+        uint32 offset_ip = offsetof(AOTFrame, ip_offset);
+        LLVMValueRef cur_frame = func_ctx->cur_frame;
+        LLVMValueRef value_offset, value_addr, value_ptr, value;
+        bool is_64bit =
+            (comp_ctx->pointer_size == sizeof(uint64)) ? true : false;
+        if (!(value_offset = I32_CONST(offset_ip))) {
+            aot_set_last_error("llvm build const failed");
+            return false;
         }
+
+        if (!(value_addr = LLVMBuildInBoundsGEP2(
+                    comp_ctx->builder, INT8_TYPE, cur_frame, &value_offset, 1,
+                    "ip_addr"))) {
+            aot_set_last_error("llvm build in bounds gep failed");
+            return false;
+        }
+
+        if (!(value_ptr = LLVMBuildBitCast(
+                    comp_ctx->builder, value_addr,
+                    is_64bit ? INT64_PTR_TYPE : INT32_PTR_TYPE, "ip_ptr"))) {
+            aot_set_last_error("llvm build bit cast failed");
+            return false;
+        }
+
+        if (!(value = LLVMBuildLoad2(comp_ctx->builder,
+                                        is_64bit ? I64_TYPE : I32_TYPE,
+                                        value_ptr, "init_ip"))) {
+            aot_set_last_error("llvm build load failed");
+            return false;
+        }
+
+        LLVMBasicBlockRef normal_block;
+        char name[32];
+        snprintf(name, sizeof(name), "restore-no_restore");
+        if (!(normal_block = LLVMAppendBasicBlockInContext(
+                    comp_ctx->context, func_ctx->func, name))) {
+            aot_set_last_error("add LLVM basic block failed.");
+            goto fail;
+        }
+        LLVMMoveBasicBlockAfter(normal_block,
+                                LLVMGetInsertBlock(comp_ctx->builder));
+        func_ctx->restore_switch =
+            LLVMBuildSwitch(comp_ctx->builder, value, normal_block, 0);
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, normal_block);
+    } else {
+        LLVMBasicBlockRef normal_block;
+        if (!(normal_block = LLVMAppendBasicBlockInContext(
+                    comp_ctx->context, func_ctx->func, "after_alloca"))) {
+            aot_set_last_error("add LLVM basic block failed.");
+            goto fail;
+        }
+        LLVMMoveBasicBlockAfter(normal_block,
+                                LLVMGetInsertBlock(comp_ctx->builder));
+        LLVMValueRef br_inst = LLVMBuildBr(comp_ctx->builder, normal_block);
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, normal_block);
     }
 
     while (frame_ip < frame_ip_end) {

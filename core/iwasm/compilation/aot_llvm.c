@@ -1615,6 +1615,11 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
         goto fail;
     }
 
+    /* Create local variables */
+    if (!create_local_variables(comp_data, comp_ctx, func_ctx, func)) {
+        goto fail;
+    }
+
     if (comp_ctx->enable_aux_stack_frame) {
         if (!alloc_frame_for_aot_func(comp_ctx, func_ctx, func_index + module->import_function_count))
             goto fail;
@@ -1628,10 +1633,6 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
         //     goto fail;
     }
 
-    /* Create local variables */
-    if (!create_local_variables(comp_data, comp_ctx, func_ctx, func)) {
-        goto fail;
-    }
 
     if (!(int8_ptr_type = LLVMPointerType(INT8_PTR_TYPE, 0))) {
         aot_set_last_error("llvm add pointer type failed.");
@@ -2416,6 +2417,9 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
     if (option->enable_every_checkpoint)
         comp_ctx->enable_every_checkpoint = true;
 
+    if (option->enable_restore)
+        comp_ctx->enable_restore = true;
+
     if (option->enable_aux_stack_dirty_bit)
         comp_ctx->enable_aux_stack_dirty_bit = true;
 
@@ -3163,14 +3167,8 @@ aot_value_stack_push(const AOTCompContext *comp_ctx, AOTValueStack *stack,
         fprintf(stderr, "gen value %d type error\n", value->type);
         exit(-1);
     }
-    if (comp_ctx->aot_frame) {
-        alloca = LLVMBuildAlloca(comp_ctx->aot_frame_alloca_builder,
-                                 llvm_value_type, "wasm_stack_alloca");
-    }
-    else {
-        alloca = LLVMBuildAlloca(comp_ctx->builder, llvm_value_type,
-                                 "wasm_stack_alloca");
-    }
+    alloca = LLVMBuildAlloca(comp_ctx->aot_frame_alloca_builder,
+                             llvm_value_type, "wasm_stack_alloca");
     if (alloca == NULL) {
         fprintf(stderr, "gen value alloca error\n");
         exit(-1);

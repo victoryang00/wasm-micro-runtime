@@ -397,25 +397,38 @@ alloc_frame_for_aot_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         aot_set_last_error("llvm build load failed");
         return false;
     }
-    
-    block_curr = LLVMGetInsertBlock(comp_ctx->builder);
-    block_init_frame = LLVMAppendBasicBlockInContext(
-        comp_ctx->context, func_ctx->func, "init_aot_frame");
-    block_skip_init_frame = LLVMAppendBasicBlockInContext(
-        comp_ctx->context, func_ctx->func, "skip_aot_frame_init");
-    block_next = LLVMAppendBasicBlockInContext(
-        comp_ctx->context, func_ctx->func, "func_begin_cont");
 
-    // if call_chain_size > 0, skip init frame, otherwise init frame
-    if (!(cmp = LLVMBuildICmp(comp_ctx->builder, LLVMIntEQ, call_chain_size, I32_ZERO,
-                              "cmp"))) {
-        aot_set_last_error("llvm build icmp failed");
-        return false;
+    block_curr = LLVMGetInsertBlock(comp_ctx->builder);
+    if (comp_ctx->enable_restore) {
+        block_init_frame = LLVMAppendBasicBlockInContext(
+            comp_ctx->context, func_ctx->func, "init_aot_frame");
+        block_skip_init_frame = LLVMAppendBasicBlockInContext(
+            comp_ctx->context, func_ctx->func, "skip_aot_frame_init");
+        block_next = LLVMAppendBasicBlockInContext(
+            comp_ctx->context, func_ctx->func, "func_begin_cont");
+
+        // if call_chain_size > 0, skip init frame, otherwise init frame
+        if (!(cmp = LLVMBuildICmp(comp_ctx->builder, LLVMIntEQ, call_chain_size, I32_ZERO,
+                                "cmp"))) {
+            aot_set_last_error("llvm build icmp failed");
+            return false;
+        }
+        LLVMMoveBasicBlockAfter(block_skip_init_frame, block_curr);
+        LLVMMoveBasicBlockAfter(block_init_frame, block_curr);
+        LLVMBuildCondBr(comp_ctx->builder, cmp, block_init_frame, block_skip_init_frame);
+
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_skip_init_frame);
+        // call_chain_size--;
+        if (!(call_chain_size = LLVMBuildSub(comp_ctx->builder, call_chain_size, I32_ONE,
+                                            "call_chain_size_minus_one"))) {
+            aot_set_last_error("llvm build sub failed");
+            return false;
+        }
+        LLVMBuildStore(comp_ctx->builder, call_chain_size, call_chain_size_ptr);
+        LLVMBuildBr(comp_ctx->builder, block_next);
+
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_init_frame);
     }
-    LLVMMoveBasicBlockAfter(block_skip_init_frame, block_curr);
-    LLVMMoveBasicBlockAfter(block_init_frame, block_curr);
-    LLVMBuildCondBr(comp_ctx->builder, cmp, block_init_frame, block_skip_init_frame);
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_init_frame);
 
     /* new_frame->sp = new_frame->lp + max_local_cell_num */
     if (!comp_ctx->is_jit_mode)
@@ -494,20 +507,11 @@ alloc_frame_for_aot_func(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     }
     LLVMBuildStore(comp_ctx->builder, func_idx_val, func_idx_ptr);
 
-    LLVMBuildBr(comp_ctx->builder, block_next);
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_skip_init_frame);
-    // call_chain_size--;
-    if (!(call_chain_size = LLVMBuildSub(comp_ctx->builder, call_chain_size, I32_ONE,
-                                         "call_chain_size_minus_one"))) {
-        aot_set_last_error("llvm build sub failed");
-        return false;
+    if (comp_ctx->enable_restore) {
+        LLVMBuildBr(comp_ctx->builder, block_next);
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_next);
+        func_ctx->block_stack.block_list_head->llvm_entry_block = block_next;
     }
-    LLVMBuildStore(comp_ctx->builder, call_chain_size, call_chain_size_ptr);
-    LLVMBuildBr(comp_ctx->builder, block_next);
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_next);
-    func_ctx->block_stack.block_list_head->llvm_entry_block = block_next;
 
     /* exec_env->cur_frame = new_frame */
     LLVMBuildStore(comp_ctx->builder, new_frame, exec_env_frame_addr);

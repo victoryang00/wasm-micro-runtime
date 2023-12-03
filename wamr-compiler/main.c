@@ -466,6 +466,10 @@ main(int argc, char *argv[])
             option.enable_aux_stack_frame = true;
             option.enable_checkpoint = true;
             option.enable_every_checkpoint = true;
+        } else if (!strcmp(argv[0], "--enable-restore")) {
+            option.enable_aux_stack_frame = true;
+            option.enable_checkpoint = true;
+            option.enable_restore = true;
         }
         else if (!strcmp(argv[0], "--enable-aux-stack-dirty-bit")) {
             option.enable_aux_stack_dirty_bit = true;
