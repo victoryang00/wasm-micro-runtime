@@ -488,7 +488,7 @@ read_leb(const uint8 *buf, uint32 *p_offset, uint32 maxbits, bool sign)
         read_leb_##ctype(frame_ip, frame_ip_end, cval);                 \
         PUSH_##src_op_type(cval);                                       \
         LOG_DEBUG("i32.const %d %d %ld", cval, *frame_sp,               \
-                  ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom); \
+                  ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom); \
     } while (0)
 
 #define DEF_OP_EQZ(src_op_type)             \
@@ -1773,9 +1773,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 else
                     PUSH_I32(*(int32 *)(frame_lp + local_offset));
                 LOG_DEBUG("local.get %d %d %ld %d %ld", local_offset, *frame_lp,
-                          ((uint8 *)frame_lp) - exec_env->wasm_stack.s.bottom,
+                          ((uint8 *)frame_lp) - exec_env->wasm_stack.bottom,
                           *frame_sp,
-                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom);
 
                 HANDLE_OP_END();
             }
@@ -1816,7 +1816,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 else
                     *(int32 *)(frame_lp + local_offset) = POP_I32();
                 LOG_DEBUG("local.set %d %d %ld", local_offset, *frame_sp,
-                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom);
 
                 HANDLE_OP_END();
             }
@@ -1889,7 +1889,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 global_addr = get_global_addr(global_data, global);
                 *(int32 *)global_addr = POP_I32();
                 LOG_DEBUG("set.global %ld %d %d %p",
-                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom,
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom,
                           *frame_sp, global_idx, global_addr);
                 HANDLE_OP_END();
             }
@@ -1932,7 +1932,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 global = globals + global_idx;
                 global_addr = get_global_addr(global_data, global);
                 LOG_DEBUG("set.global %d %d %ld", global_idx, *frame_sp,
-                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom);
                 PUT_I64_TO_ADDR((uint32 *)global_addr, POP_I64());
                 HANDLE_OP_END();
             }
@@ -1947,7 +1947,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 read_leb_uint32(frame_ip, frame_ip_end, offset);
                 addr = POP_I32();
                 LOG_DEBUG("load.i32 %d %d %d %ld", offset, flags, *frame_sp,
-                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom);
                 CHECK_MEMORY_OVERFLOW(4);
                 PUSH_I32(LOAD_I32(maddr));
                 CHECK_READ_WATCHPOINT(addr, offset);
@@ -2495,7 +2495,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             {
                 DEF_OP_NUMERIC(uint32, uint32, I32, +);
                 LOG_DEBUG("i32.add %d %ld", *frame_sp,
-                          ((uint8 *)frame_sp) - exec_env->wasm_stack.s.bottom);
+                          ((uint8 *)frame_sp) - exec_env->wasm_stack.bottom);
                 HANDLE_OP_END();
             }
 
@@ -4367,7 +4367,7 @@ wasm_interp_call_wasm(WASMModuleInstance *module_inst, WASMExecEnv *exec_env,
     frame->sp = frame->lp + 0;
 
     if ((uint8 *)(outs_area->lp + function->param_cell_num)
-        > exec_env->wasm_stack.s.top_boundary) {
+        > exec_env->wasm_stack.top_boundary) {
         wasm_set_exception(module_inst, "wasm operand stack overflow");
         return;
     }

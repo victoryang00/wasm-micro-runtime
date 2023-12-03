@@ -229,6 +229,7 @@ typedef struct AOTFuncContext {
     LLVMValueRef cur_exception;
 
     LLVMValueRef cur_frame;
+    LLVMValueRef prev_frame, exec_env_frame_addr, wasm_stack_top_ptr;
 
     bool mem_space_unchanged;
     AOTCheckedAddrList checked_addr_list;
@@ -263,6 +264,7 @@ typedef struct AOTLLVMTypes {
     LLVMTypeRef int16_ptr_type;
     LLVMTypeRef int32_ptr_type;
     LLVMTypeRef int64_ptr_type;
+    LLVMTypeRef intptr_t_ptr_type;
     LLVMTypeRef float32_ptr_type;
     LLVMTypeRef float64_ptr_type;
 

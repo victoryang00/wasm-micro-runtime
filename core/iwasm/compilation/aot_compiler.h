@@ -123,7 +123,9 @@ static inline uint32
 offset_of_local(AOTCompContext *comp_ctx, unsigned n)
 {
     if (!comp_ctx->is_jit_mode)
-        return comp_ctx->pointer_size * 7 + sizeof(uint32) * n;
+        return comp_ctx->pointer_size
+                   * (offsetof(AOTFrame, lp) / sizeof(uintptr_t))
+               + sizeof(uint32) * n;
     else
         return offsetof(AOTFrame, lp) + sizeof(uint32) * n;
 }
@@ -489,6 +491,7 @@ set_local_ref(AOTCompFrame *frame, int n, LLVMValueRef value, uint8 ref_type)
 #define INT16_PTR_TYPE comp_ctx->basic_types.int16_ptr_type
 #define INT32_PTR_TYPE comp_ctx->basic_types.int32_ptr_type
 #define INT64_PTR_TYPE comp_ctx->basic_types.int64_ptr_type
+#define INTPTR_T_PTR_TYPE comp_ctx->basic_types.intptr_t_ptr_type
 #define F32_PTR_TYPE comp_ctx->basic_types.float32_ptr_type
 #define F64_PTR_TYPE comp_ctx->basic_types.float64_ptr_type
 #define FUNC_REF_TYPE comp_ctx->basic_types.funcref_type
@@ -522,6 +525,9 @@ set_local_ref(AOTCompFrame *frame, int n, LLVMValueRef value, uint8 ref_type)
 #define I32_SEVEN LLVM_CONST(i32_seven)
 #define I32_EIGHT LLVM_CONST(i32_eight)
 #define I32_NINE LLVM_CONST(i32_nine)
+#define I32_TEN LLVM_CONST(i32_ten)
+#define I32_ELEVEN LLVM_CONST(i32_eleven)
+#define I32_TWELVE LLVM_CONST(i32_twelve)
 #define I32_NEG_ONE LLVM_CONST(i32_neg_one)
 #define I64_NEG_ONE LLVM_CONST(i64_neg_one)
 #define I32_MIN LLVM_CONST(i32_min)

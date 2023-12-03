@@ -1616,14 +1616,16 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
     }
 
     if (comp_ctx->enable_aux_stack_frame) {
-        LLVMValueRef func_idx_const;
-        if (!(func_idx_const = I32_CONST(func_index + module->import_function_count)))
-            goto fail;
-        if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx_const))
+        if (!alloc_frame_for_aot_func(comp_ctx, func_ctx, func_index + module->import_function_count))
             goto fail;
 
-        if (!create_aux_stack_frame(comp_ctx, func_ctx))
-            goto fail;
+        // LLVMValueRef func_idx_const;
+        // if (!(func_idx_const = I32_CONST(func_index + module->import_function_count)))
+        //     goto fail;
+        // if (!call_aot_alloc_frame_func(comp_ctx, func_ctx, func_idx_const))
+        //     goto fail;
+        // if (!create_aux_stack_frame(comp_ctx, func_ctx))
+        //     goto fail;
     }
 
     /* Create local variables */
@@ -1725,7 +1727,8 @@ aot_create_func_contexts(const AOTCompData *comp_data, AOTCompContext *comp_ctx)
 }
 
 static bool
-aot_set_llvm_basic_types(AOTLLVMTypes *basic_types, LLVMContextRef context)
+aot_set_llvm_basic_types(AOTLLVMTypes *basic_types, LLVMContextRef context,
+                         int pointer_size)
 {
     basic_types->int1_type = LLVMInt1TypeInContext(context);
     basic_types->int8_type = LLVMInt8TypeInContext(context);
@@ -1789,6 +1792,13 @@ aot_set_llvm_basic_types(AOTLLVMTypes *basic_types, LLVMContextRef context)
 
     basic_types->funcref_type = LLVMInt32TypeInContext(context);
     basic_types->externref_type = LLVMInt32TypeInContext(context);
+
+    if (pointer_size == 4) {
+        basic_types->intptr_t_ptr_type = basic_types->int32_ptr_type;
+    }
+    else {
+        basic_types->intptr_t_ptr_type = basic_types->int64_ptr_type;
+    }
 
     return (basic_types->int8_ptr_type && basic_types->int8_pptr_type
             && basic_types->int16_ptr_type && basic_types->int32_ptr_type
@@ -2964,7 +2974,8 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
         goto fail;
     }
 
-    if (!aot_set_llvm_basic_types(&comp_ctx->basic_types, comp_ctx->context)) {
+     if (!aot_set_llvm_basic_types(&comp_ctx->basic_types, comp_ctx->context,
+                                  comp_ctx->pointer_size)) {
         aot_set_last_error("create LLVM basic types failed.");
         goto fail;
     }
