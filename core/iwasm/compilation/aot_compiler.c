@@ -758,21 +758,32 @@ aot_gen_checkpoint(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
         return false;
 
     char name[32];
-    LLVMBasicBlockRef new_llvm_block;
+    LLVMBasicBlockRef block_restore_jump, block_restore_value;
+
     snprintf(name, sizeof(name), "restore-%zu",
              (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    if (!(new_llvm_block = LLVMAppendBasicBlockInContext(
+    if (!(block_restore_value = LLVMAppendBasicBlockInContext(
               comp_ctx->context, func_ctx->func, name))) {
         aot_set_last_error("add LLVM basic block failed.");
         return false;
     }
-    LLVMMoveBasicBlockAfter(new_llvm_block,
+
+    snprintf(name, sizeof(name), "restore-jump-%zu",
+             (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+    if (!(block_restore_jump = LLVMAppendBasicBlockInContext(
+              comp_ctx->context, func_ctx->func, name))) {
+        aot_set_last_error("add LLVM basic block failed.");
+        return false;
+    }
+
+    LLVMMoveBasicBlockAfter(block_restore_value,
                             LLVMGetInsertBlock(comp_ctx->builder));
-    if (!LLVMBuildBr(comp_ctx->builder, new_llvm_block)) {
+    LLVMMoveBasicBlockAfter(block_restore_jump, block_restore_value);
+
+    if (!LLVMBuildBr(comp_ctx->builder, block_restore_jump)) {
         aot_set_last_error("llvm build br failed.");
         return false;
     }
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, new_llvm_block);
 
     LLVMValueRef ip_offset;
     if (comp_ctx->pointer_size == sizeof(uint64))
@@ -781,12 +792,14 @@ aot_gen_checkpoint(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
     else
         ip_offset =
             I32_CONST((uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+    LLVMAddCase(func_ctx->restore_switch, ip_offset, block_restore_value);
 
-    LLVMAddCase(func_ctx->restore_switch, ip_offset, new_llvm_block);
-
+    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_value);
     if (!aot_gen_restore_values(comp_ctx->aot_frame))
         return false;
+    LLVMBuildBr(comp_ctx->builder, block_restore_jump);
 
+    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_jump);
     if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))
         return false;
 
