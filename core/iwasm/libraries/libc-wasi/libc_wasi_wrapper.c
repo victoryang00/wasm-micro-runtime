@@ -10,6 +10,8 @@
 #include "wasm_runtime_common.h"
 #include "wasmtime_ssp.h"
 
+
+
 #if WASM_ENABLE_THREAD_MGR != 0
 #include "../../../thread-mgr/thread_manager.h"
 #endif
@@ -196,7 +198,7 @@ wasi_clock_res_get(wasm_exec_env_t exec_env,
     if (!validate_native_addr(resolution, sizeof(wasi_timestamp_t)))
         return (wasi_errno_t)-1;
 
-    return wasmtime_ssp_clock_res_get(clock_id, resolution);
+    return os_clock_res_get(clock_id, resolution);
 }
 
 static wasi_errno_t
@@ -210,7 +212,7 @@ wasi_clock_time_get(wasm_exec_env_t exec_env,
     if (!validate_native_addr(time, sizeof(wasi_timestamp_t)))
         return (wasi_errno_t)-1;
 
-    return wasmtime_ssp_clock_time_get(clock_id, precision, time);
+    return os_clock_time_get(clock_id, precision, time);
 }
 
 static wasi_errno_t
@@ -299,7 +301,7 @@ wasi_fd_prestat_get(wasm_exec_env_t exec_env, wasi_fd_t fd,
     wasi_prestat_t prestat;
     wasi_errno_t err;
 
-LOG_FATAL("wasi_fd_prestat_get exec_env=%d, fd=%d \n", exec_env, fd);
+    LOG_FATAL("wasi_fd_prestat_get exec_env=%d, fd=%d \n", exec_env, fd);
     if (!wasi_ctx)
         return (wasi_errno_t)-1;
 
@@ -413,7 +415,7 @@ wasi_fd_pread(wasm_exec_env_t exec_env, wasi_fd_t fd, iovec_app_t *iovec_app,
 
     /* success */
     err = 0;
-LOG_FATAL("wasi_fd_pread exec_env=%d, fd=%d \n", exec_env, fd);
+    LOG_FATAL("wasi_fd_pread exec_env=%d, fd=%d \n", exec_env, fd);
 
 fail:
     wasm_runtime_free(iovec_begin);
@@ -468,7 +470,7 @@ wasi_fd_pwrite(wasm_exec_env_t exec_env, wasi_fd_t fd,
 
     /* success */
     err = 0;
-LOG_FATAL("wasi_fd_pwrite exec_env=%d, fd=%d, iovec_app=%d, iovs_len=%d, offset=%d, nwritten_app=%d \n", exec_env, fd, iovec_app, iovs_len, offset, nwritten_app);
+    LOG_FATAL("wasi_fd_pwrite exec_env=%d, fd=%d, iovec_app=%d, iovs_len=%d, offset=%d, nwritten_app=%d \n", exec_env, fd, iovec_app, iovs_len, offset, nwritten_app);
 
 fail:
     wasm_runtime_free(ciovec_begin);
@@ -544,7 +546,7 @@ wasi_fd_renumber(wasm_exec_env_t exec_env, wasi_fd_t from, wasi_fd_t to)
     if (!wasi_ctx)
         return (wasi_errno_t)-1;
 
-LOG_FATAL("wasi_fd_renumber from= %d to=%d\n", from, to);
+    LOG_FATAL("wasi_fd_renumber from= %d to=%d\n", from, to);
     return wasmtime_ssp_fd_renumber(exec_env, curfds, prestats, from, to);
 }
 
@@ -844,7 +846,7 @@ wasi_fd_readdir(wasm_exec_env_t exec_env, wasi_fd_t fd, void *buf,
     size_t bufused;
     wasi_errno_t err;
 
-LOG_FATAL("wasi_fd_readdir exec_env=%d, fd=%d, buf=%d, buf_len=%d, cookie=%d, bufused_app=%d \n", exec_env, fd, buf, buf_len, cookie, bufused_app);
+    LOG_FATAL("wasi_fd_readdir exec_env=%d, fd=%d, buf=%d, buf_len=%d, cookie=%d, bufused_app=%d \n", exec_env, fd, buf, buf_len, cookie, bufused_app);
     if (!wasi_ctx)
         return (wasi_errno_t)-1;
 
@@ -1855,7 +1857,7 @@ wasi_sock_open(wasm_exec_env_t exec_env, wasi_fd_t poolfd,
     wasm_module_inst_t module_inst = get_module_inst(exec_env);
     wasi_ctx_t wasi_ctx = get_wasi_ctx(module_inst);
     struct fd_table *curfds = NULL;
-int ret;
+    int ret;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
     // note: pass default protocol 0 - IP
@@ -1905,7 +1907,9 @@ wasi_sock_set_keep_alive(wasm_exec_env_t exec_env, wasi_fd_t fd,
     wasm_module_inst_t module_inst = get_module_inst(exec_env);
     wasi_ctx_t wasi_ctx = get_wasi_ctx(module_inst);
     struct fd_table *curfds = NULL;
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE!=0
+    LOG_FATAL("wasi_sock_set_keep_alive exec_env=%d, fd=%d, is_enabled=%d \n", exec_env, fd, is_enabled);
+#endif
     if (!wasi_ctx)
         return __WASI_EACCES;
 

@@ -216,6 +216,22 @@ tensorflowlite_init_execution_context(void *tflite_ctx, graph g,
                 NN_ERR_PRINTF("Error when enabling GPU delegate.");
                 use_default = true;
             }
+#elif defined(WASI_NN_ENABLE_EXTERNAL_DELEGATE)
+            NN_WARN_PRINTF("external delegation enabled.");
+            TfLiteExternalDelegateOptions options =
+                TfLiteExternalDelegateOptionsDefault(WASI_NN_EXT_DELEGATE_PATH);
+            tfl_ctx->delegate = TfLiteExternalDelegateCreate(&options);
+            if (tfl_ctx->delegate == NULL) {
+                NN_ERR_PRINTF("Error when generating External delegate.");
+                use_default = true;
+                return missing_memory;
+            }
+            if (tfl_ctx->interpreters[*ctx]
+                    .interpreter->ModifyGraphWithDelegate(tfl_ctx->delegate)
+                != kTfLiteOk) {
+                NN_ERR_PRINTF("Error when enabling External delegate.");
+                use_default = true;
+            }
 #else
             NN_WARN_PRINTF("GPU not enabled.");
             use_default = true;
@@ -446,6 +462,14 @@ tensorflowlite_destroy(void *tflite_ctx)
         * https://github.com/tensorflow/tensorflow/issues/15880
     */
     TFLiteContext *tfl_ctx = (TFLiteContext *)tflite_ctx;
+
+    if (tfl_ctx->delegate != NULL) {
+#if defined(WASI_NN_ENABLE_GPU)
+        TfLiteGpuDelegateV2Delete(tfl_ctx->delegate);
+#elif defined(WASI_NN_ENABLE_EXTERNAL_DELEGATE)
+        TfLiteExternalDelegateDelete(tfl_ctx->delegate);
+#endif
+    }
 
     NN_DBG_PRINTF("Freeing memory.");
     for (int i = 0; i < MAX_GRAPHS_PER_INST; ++i) {

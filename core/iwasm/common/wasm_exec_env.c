@@ -49,17 +49,23 @@ wasm_exec_env_create_internal(struct WASMModuleInstanceCommon *module_inst,
 
     if (os_cond_init(&exec_env->wait_cond) != 0)
         goto fail3;
+
+#if WASM_ENABLE_DEBUG_INTERP != 0
+    if (!(exec_env->current_status = wasm_cluster_create_exenv_status()))
+        goto fail4;
+#endif
 #endif
 
 #ifdef OS_ENABLE_HW_BOUND_CHECK
     if (!(exec_env->exce_check_guard_page =
-              os_mmap(NULL, os_getpagesize(), MMAP_PROT_NONE, MMAP_MAP_NONE)))
-        goto fail4;
+              os_mmap(NULL, os_getpagesize(), MMAP_PROT_NONE, MMAP_MAP_NONE,
+                      os_get_invalid_handle())))
+        goto fail5;
 #endif
 
     exec_env->module_inst = module_inst;
     exec_env->wasm_stack_size = stack_size;
-exec_env->is_checkpoint = false;
+    exec_env->is_checkpoint = false;
     exec_env->wasm_stack.s.top_boundary =
         exec_env->wasm_stack.s.bottom + stack_size;
     exec_env->wasm_stack.s.top = exec_env->wasm_stack.s.bottom;
@@ -79,10 +85,16 @@ exec_env->is_checkpoint = false;
     return exec_env;
 
 #ifdef OS_ENABLE_HW_BOUND_CHECK
-fail4:
+fail5:
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_DEBUG_INTERP != 0
+    wasm_cluster_destroy_exenv_status(exec_env->current_status);
+#endif
 #endif
 #if WASM_ENABLE_THREAD_MGR != 0
+#if WASM_ENABLE_DEBUG_INTERP != 0
+fail4:
     os_cond_destroy(&exec_env->wait_cond);
+#endif
 fail3:
     os_mutex_destroy(&exec_env->wait_lock);
 fail2:
@@ -104,6 +116,9 @@ wasm_exec_env_destroy_internal(WASMExecEnv *exec_env)
 #if WASM_ENABLE_THREAD_MGR != 0
     os_mutex_destroy(&exec_env->wait_lock);
     os_cond_destroy(&exec_env->wait_cond);
+#if WASM_ENABLE_DEBUG_INTERP != 0
+    wasm_cluster_destroy_exenv_status(exec_env->current_status);
+#endif
 #endif
 #if WASM_ENABLE_AOT != 0
     wasm_runtime_free(exec_env->argv_buf);
@@ -193,7 +208,13 @@ void
 wasm_exec_env_set_module_inst(WASMExecEnv *exec_env,
                               WASMModuleInstanceCommon *const module_inst)
 {
+#if WASM_ENABLE_THREAD_MGR != 0
+    wasm_cluster_traverse_lock(exec_env);
+#endif
     exec_env->module_inst = module_inst;
+#if WASM_ENABLE_THREAD_MGR != 0
+    wasm_cluster_traverse_unlock(exec_env);
+#endif
 }
 
 void
@@ -206,6 +227,9 @@ wasm_exec_env_restore_module_inst(
     WASMModuleInstance *module_inst = (WASMModuleInstance *)module_inst_common;
     char cur_exception[EXCEPTION_BUF_LEN];
 
+#if WASM_ENABLE_THREAD_MGR != 0
+    wasm_cluster_traverse_lock(exec_env);
+#endif
     exec_env->module_inst = module_inst_common;
     /*
      * propagate an exception if any.
@@ -220,6 +244,9 @@ wasm_exec_env_restore_module_inst(
         cur_exception[0] = '\0';
     }
     exception_unlock(old_module_inst);
+#if WASM_ENABLE_THREAD_MGR != 0
+    wasm_cluster_traverse_unlock(exec_env);
+#endif
     if (cur_exception[0] != '\0') {
         exception_lock(module_inst);
         bh_memcpy_s(module_inst->cur_exception,
@@ -235,14 +262,14 @@ wasm_exec_env_set_thread_info(WASMExecEnv *exec_env)
     uint8 *stack_boundary = os_thread_get_stack_boundary();
 
 // #if WASM_ENABLE_THREAD_MGR != 0
-    //     os_mutex_lock(&exec_env->wait_lock);
+//     os_mutex_lock(&exec_env->wait_lock);
 // #endif
     exec_env->handle = os_self_thread();
     exec_env->native_stack_boundary =
         stack_boundary ? stack_boundary + WASM_STACK_GUARD_SIZE : NULL;
     exec_env->native_stack_top_min = (void *)UINTPTR_MAX;
 // #if WASM_ENABLE_THREAD_MGR != 0
-    //     os_mutex_unlock(&exec_env->wait_lock);
+//     os_mutex_unlock(&exec_env->wait_lock);
 // #endif
 }
 

@@ -163,13 +163,6 @@ os_mutex_lock(korp_mutex *mutex)
 }
 
 int
-os_mutex_trylock(korp_mutex *mutex)
-{
-    /* unsupported */
-    return BHT_ERROR;
-}
-
-int
 os_mutex_unlock(korp_mutex *mutex)
 {
     return rt_mutex_release(mutex);
@@ -198,7 +191,7 @@ os_cond_wait(korp_cond *cond, korp_mutex *mutex)
 }
 
 void *
-os_mmap(void *hint, size_t size, int prot, int flags)
+os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 {
     return rt_malloc(size);
 }
