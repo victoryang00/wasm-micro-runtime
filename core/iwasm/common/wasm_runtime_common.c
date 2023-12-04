@@ -59,6 +59,10 @@
 #undef CHECK
 #undef CHECK1
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#undef wasm_runtime_invoke_native
+#endif
+
 #if WASM_ENABLE_MULTI_MODULE != 0
 /**
  * A safety insurance to prevent
@@ -6082,3 +6086,17 @@ wasm_runtime_get_context(WASMModuleInstanceCommon *inst, void *key)
     return wasm_native_get_context(inst, key);
 }
 #endif /* WASM_ENABLE_MODULE_INST_CONTEXT != 0 */
+
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+bool
+wasm_runtime_invoke_native_shim(WASMExecEnv *exec_env, void *func_ptr,
+                           const WASMType *func_type, const char *signature,
+                           void *attachment, uint32 *argv, uint32 argc,
+                           uint32 *argv_ret)
+{
+    lightweight_checkpoint(exec_env);
+    bool ret  = wasm_runtime_invoke_native(exec_env, func_ptr, func_type, signature, attachment, argv, argc, argv_ret);
+    lightweight_uncheckpoint();
+    return ret;
+}
+#endif

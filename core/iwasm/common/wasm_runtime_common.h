@@ -1021,6 +1021,14 @@ wasm_runtime_invoke_native_raw(WASMExecEnv *exec_env, void *func_ptr,
                                void *attachment, uint32 *argv, uint32 argc,
                                uint32 *ret);
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#define wasm_runtime_invoke_native wasm_runtime_invoke_native_shim
+bool
+wasm_runtime_invoke_native_shim(WASMExecEnv *exec_env, void *func_ptr,
+                           const WASMType *func_type, const char *signature,
+                           void *attachment, uint32 *argv, uint32 argc,
+                           uint32 *argv_ret);
+#endif
 void
 wasm_runtime_read_v128(const uint8 *bytes, uint64 *ret1, uint64 *ret2);
 
