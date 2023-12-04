@@ -4698,6 +4698,7 @@ bool
 wasm_runtime_call_indirect(WASMExecEnv *exec_env, uint32 element_index,
                            uint32 argc, uint32 argv[])
 {
+    fprintf(stderr, "wasm_runtime_call_indirect\n");
     bool ret = false;
 
     if (!wasm_runtime_exec_env_check(exec_env)) {

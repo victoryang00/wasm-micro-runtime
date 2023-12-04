@@ -412,6 +412,7 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
         bh_assert(memory_idx == 0);
         bh_assert(parent->memory_count > memory_idx);
         shared_memory_instance = parent->memories[memory_idx];
+        shared_memory_instance->ref_count++;
         shared_memory_inc_reference(shared_memory_instance);
         return shared_memory_instance;
     }
@@ -2228,6 +2229,7 @@ aot_call_indirect(WASMExecEnv *exec_env, uint32 tbl_idx, uint32 table_elem_idx,
     }
 
     func_idx = tbl_inst->elems[table_elem_idx];
+    fprintf(stderr, "func_idx: %d\n", func_idx);
     if (func_idx == NULL_REF) {
         aot_set_exception_with_id(module_inst, EXCE_UNINITIALIZED_ELEMENT);
         goto fail;
@@ -2863,6 +2865,7 @@ get_func_name_from_index(const AOTModuleInstance *module_inst,
 bool
 aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
+    int tid = gettid();
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTModule *module = (AOTModule *)module_inst->module;
 #if WASM_ENABLE_PERF_PROFILING != 0
@@ -2884,8 +2887,11 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
             exec_env->restore_call_chain = NULL;
             exec_env->is_restore = false;
         }
+        fprintf(stderr, "restore call chain %zu==%u thread %d\n", ((AOTFrame*)exec_env->cur_frame)->func_index, func_index, tid);
         return true;
     }
+
+    fprintf(stderr, "aot_alloc_frame %u thread %d\n", func_index, tid);
 
     if (func_index >= module->import_func_count) {
         aot_func_idx = func_index - module->import_func_count;
@@ -2934,7 +2940,7 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 void
 aot_free_frame(WASMExecEnv *exec_env)
 {
-    // fprintf(stderr, "aot_free_frame %zu\n", ((AOTFrame*)exec_env->cur_frame)->func_index);
+    fprintf(stderr, "aot_free_frame %zu\n", ((AOTFrame*)exec_env->cur_frame)->func_index);
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
 

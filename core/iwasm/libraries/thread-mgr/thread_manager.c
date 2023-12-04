@@ -655,6 +655,7 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     WASMExecEnv *new_exec_env;
     uint32 aux_stack_start = 0, aux_stack_size;
     korp_tid tid;
+    void* save_restore_call_chain;
 
     cluster = wasm_exec_env_get_cluster(exec_env);
     bh_assert(cluster);
@@ -668,6 +669,8 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     if (exec_env->is_restore) {
         // Don't generate a new env on restore
         new_exec_env = exec_env;
+        save_restore_call_chain = exec_env->restore_call_chain;
+        exec_env->restore_call_chain = NULL;
     }
     else {
         new_exec_env = wasm_exec_env_create_internal(module_inst,
@@ -709,6 +712,11 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     new_exec_env->thread_arg = arg;
 
     os_mutex_lock(&new_exec_env->wait_lock);
+
+    if (exec_env->is_restore) {
+        exec_env->restore_call_chain = save_restore_call_chain;
+        exec_env->is_restore = true;
+    }
 
     if (0
         != os_thread_create(&tid, thread_manager_start_routine,

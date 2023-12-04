@@ -576,18 +576,19 @@ pthread_create_wrapper(wasm_exec_env_t exec_env,
     }
 #endif
 
-    if (!(new_module_inst = wasm_runtime_instantiate_internal(
-              module, module_inst, exec_env, stack_size, 0, NULL, 0)))
-        return -1;
+    new_module_inst = wasm_exec_env_get_module_inst(exec_env);
+    // if (!(new_module_inst = wasm_runtime_instantiate_internal(
+    //           module, module_inst, exec_env, stack_size, 0, NULL, 0)))
+    //     return -1;
 
-    /* Set custom_data to new module instance */
-    wasm_runtime_set_custom_data_internal(
-        new_module_inst, wasm_runtime_get_custom_data(module_inst));
+    // /* Set custom_data to new module instance */
+    // wasm_runtime_set_custom_data_internal(
+    //     new_module_inst, wasm_runtime_get_custom_data(module_inst));
 
-    wasm_native_inherit_contexts(new_module_inst, module_inst);
+    // wasm_native_inherit_contexts(new_module_inst, module_inst);
 
-    if (!(wasm_cluster_dup_c_api_imports(new_module_inst, module_inst)))
-        goto fail;
+    // if (!(wasm_cluster_dup_c_api_imports(new_module_inst, module_inst)))
+    //     goto fail;
 
     if (!(info_node = wasm_runtime_malloc(sizeof(ThreadInfoNode))))
         goto fail;
