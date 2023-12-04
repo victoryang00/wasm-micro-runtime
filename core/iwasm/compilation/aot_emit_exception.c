@@ -168,7 +168,6 @@ aot_compile_emit_fence_nop(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
         aot_set_last_error("llvm build nop asm failed.");
         return false;
     }
-    free(asm_string);
     if (!(value =
               LLVMBuildCall2(comp_ctx->builder, ty, inline_asm, NULL, 0, ""))) {
         aot_set_last_error("llvm build call nop failed.");
