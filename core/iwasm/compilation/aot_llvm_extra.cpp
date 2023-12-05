@@ -54,6 +54,7 @@
 #include <llvm/Transforms/Scalar/SimpleLoopUnswitch.h>
 #include <llvm/Transforms/Scalar/LICM.h>
 #include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Utils/Mem2Reg.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #if LLVM_VERSION_MAJOR >= 12
@@ -400,8 +401,9 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
         FunctionPassManager FPM;
 
         /* Apply Vectorize related passes for AOT mode */
+        FPM.addPass(PromotePass());
         FPM.addPass(LoopVectorizePass());
-        FPM.addPass(SLPVectorizerPass());
+        // FPM.addPass(SLPVectorizerPass());
         FPM.addPass(LoadStoreVectorizerPass());
 
         if (comp_ctx->enable_llvm_pgo || comp_ctx->use_prof_file) {
