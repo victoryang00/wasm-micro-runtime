@@ -2411,6 +2411,9 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
     if (option->enable_checkpoint)
         comp_ctx->enable_checkpoint = true;
 
+    if (option->enable_loop_checkpoint)
+        comp_ctx->enable_loop_checkpoint = true;
+
     if (option->enable_br_checkpoint)
         comp_ctx->enable_br_checkpoint = true;
 

@@ -751,6 +751,7 @@ bool
 aot_gen_checkpoint(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                    const uint8 *frame_ip)
 {
+    comp_ctx->inst_checkpointed = true;
     if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
                               frame_ip))
         return false;
@@ -830,6 +831,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
     float32 f32_const;
     float64 f64_const;
     AOTFuncType *func_type = NULL;
+    bool last_op_is_loop = false;
 #if WASM_ENABLE_DEBUG_AOT != 0
     LLVMMetadataRef location;
 #endif
@@ -911,11 +913,13 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
     while (frame_ip < frame_ip_end) {
         // fprintf(stderr, "%p\n", (void*)comp_ctx->aot_frame);
+        comp_ctx->inst_checkpointed = false;
         opcode = *frame_ip++;
 
-        if (comp_ctx->enable_every_checkpoint) {
+        if (comp_ctx->enable_every_checkpoint || (comp_ctx->enable_loop_checkpoint && last_op_is_loop)) {
             bh_assert(comp_ctx->aot_frame);
             aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+            last_op_is_loop = false;
         }
 
 #if WASM_ENABLE_DEBUG_AOT != 0
@@ -937,6 +941,8 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_BLOCK:
             case WASM_OP_LOOP:
             {
+                if (opcode == WASM_OP_LOOP)
+                    last_op_is_loop = true;
                 value_type = *frame_ip++;
                 if (value_type == VALUE_TYPE_I32 || value_type == VALUE_TYPE_I64
                     || value_type == VALUE_TYPE_F32
@@ -989,7 +995,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR:
-                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
@@ -1005,7 +1011,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR_IF:
-                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
@@ -1022,7 +1028,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 break;
 
             case WASM_OP_BR_TABLE:
-                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
@@ -1058,7 +1064,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 #if WASM_ENABLE_FAST_INTERP == 0
             case EXT_OP_BR_TABLE_CACHE:
             {
-                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
@@ -1102,7 +1108,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_CALL:
             {
                 uint8 *frame_ip_org = frame_ip;
-                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     bh_assert(comp_ctx->aot_frame);
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
                 }
@@ -1119,7 +1125,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
-                if (comp_ctx->enable_checkpoint && !comp_ctx->enable_every_checkpoint) {
+                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     bh_assert(comp_ctx->aot_frame);
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
                 }
