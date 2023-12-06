@@ -658,7 +658,10 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     WASMExecEnv *new_exec_env;
     uint32 aux_stack_start = 0, aux_stack_size;
     korp_tid tid;
-    void* save_restore_call_chain;
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    void* save_restore_call_chain = NULL;
+    bool is_restore = false;
+#endif
 
     cluster = wasm_exec_env_get_cluster(exec_env);
     bh_assert(cluster);
@@ -669,16 +672,25 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
         goto fail1;
     }
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->is_restore) {
         // Don't generate a new env on restore
         new_exec_env = restore_env();
-        save_restore_call_chain = exec_env->restore_call_chain;
+        printf("restored child env\n");
+        save_restore_call_chain = new_exec_env->restore_call_chain;
+        is_restore = true;
         exec_env->restore_call_chain = NULL;
+        exec_env->is_restore = false;
+        fprintf(stderr, "thread mgr: save_restore_call_chain %p\n", save_restore_call_chain);
     }
     else {
+#endif
         new_exec_env = wasm_exec_env_create_internal(module_inst,
                                                      exec_env->wasm_stack_size);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     }
+#endif
+    LOG_DEBUG("new exec env is at %p\n", new_exec_env);
 
     if (!new_exec_env)
         goto fail1;
@@ -690,6 +702,7 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
             goto fail2;
         }
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
         // only need to transfer if not restoring
         if (!exec_env->is_restore) {
             /* Set aux stack for current thread */
@@ -698,6 +711,7 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
                 goto fail3;
             }
         }
+#endif
     }
     else {
         /* Disable aux stack */
@@ -716,10 +730,12 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
 
     os_mutex_lock(&new_exec_env->wait_lock);
 
-    if (exec_env->is_restore) {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (is_restore) {
         exec_env->restore_call_chain = save_restore_call_chain;
         exec_env->is_restore = true;
     }
+#endif
 
     if (0
         != os_thread_create(&tid, thread_manager_start_routine,

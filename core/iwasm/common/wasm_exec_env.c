@@ -82,6 +82,10 @@ wasm_exec_env_create_internal(struct WASMModuleInstanceCommon *module_inst,
     wasm_runtime_dump_exec_env_mem_consumption(exec_env);
 #endif
 
+    exec_env->is_checkpoint = false;
+    exec_env->is_restore = false;
+    exec_env->call_chain_size = 0;
+    exec_env->restore_call_chain = NULL;
     return exec_env;
 
 #ifdef OS_ENABLE_HW_BOUND_CHECK
@@ -159,10 +163,6 @@ wasm_exec_env_create(struct WASMModuleInstanceCommon *module_inst,
     }
 #endif
 
-    exec_env->is_checkpoint = false;
-    exec_env->is_restore = false;
-    exec_env->call_chain_size = 0;
-    exec_env->restore_call_chain = NULL;
 
 #if WASM_ENABLE_THREAD_MGR != 0
     /* Create a new cluster for this exec_env */

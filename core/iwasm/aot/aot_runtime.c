@@ -2229,7 +2229,15 @@ aot_call_indirect(WASMExecEnv *exec_env, uint32 tbl_idx, uint32 table_elem_idx,
     }
 
     func_idx = tbl_inst->elems[table_elem_idx];
-    fprintf(stderr, "func_idx: %d\n", func_idx);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if(exec_env->is_restore){
+        struct AOTFrame * rcc = *(exec_env->restore_call_chain);
+        while(rcc->prev_frame){rcc = rcc->prev_frame;}
+        LOG_DEBUG("func_idx: %d instead of %d of thread %d\n", rcc->func_index, func_idx, gettid());
+        func_idx = rcc->func_index;
+
+    }
+#endif
     if (func_idx == NULL_REF) {
         aot_set_exception_with_id(module_inst, EXCE_UNINITIALIZED_ELEMENT);
         goto fail;

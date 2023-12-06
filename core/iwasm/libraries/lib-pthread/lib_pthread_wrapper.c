@@ -512,6 +512,9 @@ pthread_start_routine(void *arg)
     wasm_exec_env_set_thread_info(exec_env);
     argv[0] = routine_args->arg;
 
+    if(exec_env->is_restore){
+	    wamr_wait();
+    }
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
                                     argv)) {
         /* Exception has already been spread during throwing */
