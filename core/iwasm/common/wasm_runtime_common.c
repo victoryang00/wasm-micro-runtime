@@ -3718,6 +3718,7 @@ wasm_runtime_invoke_native(WASMExecEnv *exec_env, void *func_ptr,
     bool ret = false;
 #if WASM_ENABLE_REF_TYPES != 0
     bool is_aot_func = (NULL == signature);
+    //if(is_aot_func) lightweight_uncheckpoint();
 #endif
 #if !defined(BUILD_TARGET_RISCV32_ILP32) && !defined(BUILD_TARGET_ARC)
     uint32 *fps;
@@ -4698,7 +4699,7 @@ bool
 wasm_runtime_call_indirect(WASMExecEnv *exec_env, uint32 element_index,
                            uint32 argc, uint32 argv[])
 {
-    fprintf(stderr, "wasm_runtime_call_indirect\n");
+    fprintf(stderr, "wasm_runtime_call_indirect from %d\n", gettid());
     bool ret = false;
 
     if (!wasm_runtime_exec_env_check(exec_env)) {

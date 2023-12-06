@@ -630,7 +630,7 @@ thread_manager_start_routine(void *arg)
     }
 
     /* Free aux stack space */
-    free_aux_stack(exec_env, exec_env->aux_stack_bottom.bottom);
+    //free_aux_stack(exec_env, exec_env->aux_stack_bottom.bottom);
     /* Remove exec_env */
     wasm_cluster_del_exec_env_internal(cluster, exec_env, false);
     /* Destroy exec_env */
