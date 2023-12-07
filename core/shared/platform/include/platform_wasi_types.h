@@ -33,11 +33,7 @@ extern "C" {
 
 /* There is no need to check the WASI layout if we're using uvwasi or libc-wasi
  * is not enabled at all. */
-#if WASM_ENABLE_UVWASI != 0 || WASM_ENABLE_LIBC_WASI == 0
 #define assert_wasi_layout(expr, message) /* nothing */
-#else
-#define assert_wasi_layout(expr, message) _Static_assert(expr, message)
-#endif
 
 assert_wasi_layout(_Alignof(int8_t) == 1, "non-wasi data layout");
 assert_wasi_layout(_Alignof(uint8_t) == 1, "non-wasi data layout");

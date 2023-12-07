@@ -2231,12 +2231,14 @@ aot_call_indirect(WASMExecEnv *exec_env, uint32 tbl_idx, uint32 table_elem_idx,
 
     func_idx = tbl_inst->elems[table_elem_idx];
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if(exec_env->is_restore){
-        struct AOTFrame * rcc = *(exec_env->restore_call_chain);
-        while(rcc->prev_frame){rcc = rcc->prev_frame;}
-        LOG_DEBUG("func_idx: %d instead of %d of thread %d\n", rcc->func_index, func_idx, gettid());
+    if (exec_env->is_restore) {
+        struct AOTFrame *rcc = *(exec_env->restore_call_chain);
+        while (rcc->prev_frame) {
+            rcc = rcc->prev_frame;
+        }
+        LOG_DEBUG("func_idx: %d instead of %d of thread %d\n", rcc->func_index,
+                  func_idx, gettid());
         func_idx = rcc->func_index;
-
     }
 #endif
     if (func_idx == NULL_REF) {
@@ -2874,7 +2876,9 @@ get_func_name_from_index(const AOTModuleInstance *module_inst,
 bool
 aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     fprintf(stderr, "aot_alloc_frame %u thread %d\n", func_index, gettid());
+#endif
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTModule *module = (AOTModule *)module_inst->module;
 #if WASM_ENABLE_PERF_PROFILING != 0
@@ -2884,7 +2888,7 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     AOTFrame *frame;
     uint32 max_local_cell_num, max_stack_cell_num, all_cell_num;
     uint32 aot_func_idx, frame_size;
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->restore_call_chain) {
         frame = exec_env->restore_call_chain[exec_env->call_chain_size - 1];
         // fprintf(stderr, "frame restored, func idx %zu\n", frame->func_index);
@@ -2896,15 +2900,17 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
             exec_env->restore_call_chain = NULL;
             exec_env->is_restore = false;
         }
-        fprintf(stderr, "restore call chain %zu==%u, %p, %p, %d\n", ((AOTFrame*)exec_env->cur_frame)->func_index, func_index, exec_env, exec_env->restore_call_chain, gettid());
-        if (((AOTFrame*)exec_env->cur_frame)->func_index != func_index) {
+        fprintf(stderr, "restore call chain %zu==%u, %p, %p, %d\n",
+                ((AOTFrame *)exec_env->cur_frame)->func_index, func_index,
+                exec_env, exec_env->restore_call_chain, gettid());
+        if (((AOTFrame *)exec_env->cur_frame)->func_index != func_index) {
             fprintf(stderr, "NOT MATCH!!!\n");
             exit(1);
         }
 
         return true;
     }
-
+#endif
 
     if (func_index >= module->import_func_count) {
         aot_func_idx = func_index - module->import_func_count;
@@ -2953,7 +2959,10 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 void
 aot_free_frame(WASMExecEnv *exec_env)
 {
-    fprintf(stderr, "aot_free_frame %zu %d\n", ((AOTFrame*)exec_env->cur_frame)->func_index, gettid());
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    fprintf(stderr, "aot_free_frame %zu %d\n",
+            ((AOTFrame *)exec_env->cur_frame)->func_index, gettid());
+#endif
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
 
@@ -3092,9 +3101,10 @@ aot_dump_call_stack(WASMExecEnv *exec_env, bool print, char *buf, uint32 len)
 
         /* function name not exported, print number instead */
         if (frame.func_name_wp == NULL) {
-            line_length =
-                snprintf(line_buf, sizeof(line_buf),
-                         "#%02" PRIu32 " $f%" PRIu32 " %s\n", n, frame.func_index, get_func_name_from_index(module_inst, frame.func_index));
+            line_length = snprintf(
+                line_buf, sizeof(line_buf), "#%02" PRIu32 " $f%" PRIu32 " %s\n",
+                n, frame.func_index,
+                get_func_name_from_index(module_inst, frame.func_index));
         }
         else {
             line_length =

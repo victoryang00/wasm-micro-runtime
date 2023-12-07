@@ -36,7 +36,9 @@
 #endif
 #include "../common/wasm_c_api_internal.h"
 #include "../../version.h"
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../include/wamr_export.h"
+#endif
 /**
  * For runtime build, BH_MALLOC/BH_FREE should be defined as
  * wasm_runtime_malloc/wasm_runtime_free.
@@ -3718,7 +3720,7 @@ wasm_runtime_invoke_native(WASMExecEnv *exec_env, void *func_ptr,
     bool ret = false;
 #if WASM_ENABLE_REF_TYPES != 0
     bool is_aot_func = (NULL == signature);
-    //if(is_aot_func) lightweight_uncheckpoint();
+    // if(is_aot_func) lightweight_uncheckpoint();
 #endif
 #if !defined(BUILD_TARGET_RISCV32_ILP32) && !defined(BUILD_TARGET_ARC)
     uint32 *fps;
@@ -5732,7 +5734,7 @@ wasm_runtime_invoke_c_api_native(WASMModuleInstanceCommon *module_inst,
             wasm_runtime_set_exception(
                 module_inst, "native function throw unknown exception");
         }
-        wasm_trap_delete(trap);
+        // wasm_trap_delete(trap);
         goto fail;
     }
 
@@ -6149,13 +6151,19 @@ wasm_runtime_get_context(WASMModuleInstanceCommon *inst, void *key)
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 bool
 wasm_runtime_invoke_native_shim(WASMExecEnv *exec_env, void *func_ptr,
-                           const WASMType *func_type, const char *signature,
-                           void *attachment, uint32 *argv, uint32 argc,
-                           uint32 *argv_ret)
+                                const WASMType *func_type,
+                                const char *signature, void *attachment,
+                                uint32 *argv, uint32 argc, uint32 *argv_ret)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     lightweight_checkpoint(exec_env);
-    bool ret  = wasm_runtime_invoke_native(exec_env, func_ptr, func_type, signature, attachment, argv, argc, argv_ret);
-    lightweight_uncheckpoint();
+#endif
+    bool ret =
+        wasm_runtime_invoke_native(exec_env, func_ptr, func_type, signature,
+                                   attachment, argv, argc, argv_ret);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    lightweight_uncheckpoint(exec_env);
+#endif
     return ret;
 }
 #endif

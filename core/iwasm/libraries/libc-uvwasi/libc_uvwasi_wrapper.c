@@ -6,6 +6,7 @@
 #include "uvwasi.h"
 #include "bh_platform.h"
 #include "wasm_export.h"
+#include "wasm_runtime_common.h"
 
 /* clang-format off */
 #define get_module_inst(exec_env) \

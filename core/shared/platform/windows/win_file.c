@@ -4,7 +4,7 @@
  */
 
 #include "platform_api_extension.h"
-#include "libc_errno.h"
+#include "../common/libc-util/libc_errno.h"
 #include "win_util.h"
 
 #include "PathCch.h"

@@ -681,7 +681,9 @@ pthread_join_wrapper(wasm_exec_env_t exec_env, uint32 thread,
         lightweight_checkpoint(exec_env);
         /* if the thread is still running, call the platforms join API */
         join_ret = wasm_cluster_join_thread(target_exec_env, (void **)&ret);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
         lightweight_uncheckpoint(exec_env);
+#endif
     }
     else {
         /* if the thread has exited, return stored results */
