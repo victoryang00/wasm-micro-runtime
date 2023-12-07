@@ -37,7 +37,7 @@
 #include "../common/wasm_c_api_internal.h"
 #include "../../version.h"
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-#include "../../../../include/wamr_export.h"
+#include "../../../../../include/wamr_export.h"
 #endif
 /**
  * For runtime build, BH_MALLOC/BH_FREE should be defined as
@@ -4701,7 +4701,9 @@ bool
 wasm_runtime_call_indirect(WASMExecEnv *exec_env, uint32 element_index,
                            uint32 argc, uint32 argv[])
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     fprintf(stderr, "wasm_runtime_call_indirect from %d\n", gettid());
+#endif
     bool ret = false;
 
     if (!wasm_runtime_exec_env_check(exec_env)) {
