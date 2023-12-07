@@ -511,10 +511,11 @@ pthread_start_routine(void *arg)
 
     wasm_exec_env_set_thread_info(exec_env);
     argv[0] = routine_args->arg;
-
-    if(exec_env->is_restore){
-	    wamr_wait();
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (exec_env->is_restore) {
+        wamr_wait();
     }
+#endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
                                     argv)) {
         /* Exception has already been spread during throwing */
@@ -678,7 +679,9 @@ pthread_join_wrapper(wasm_exec_env_t exec_env, uint32 thread,
     bh_assert(target_exec_env);
 
     if (node->status != THREAD_EXIT) {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
         lightweight_checkpoint(exec_env);
+#endif
         /* if the thread is still running, call the platforms join API */
         join_ret = wasm_cluster_join_thread(target_exec_env, (void **)&ret);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
