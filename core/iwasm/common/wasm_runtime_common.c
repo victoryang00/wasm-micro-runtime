@@ -37,7 +37,7 @@
 #include "../common/wasm_c_api_internal.h"
 #include "../../version.h"
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-#include "../../../../include/wamr_export.h"
+#include "../../../../../include/wamr_export.h"
 #endif
 /**
  * For runtime build, BH_MALLOC/BH_FREE should be defined as
