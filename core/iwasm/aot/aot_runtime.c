@@ -19,7 +19,6 @@
 #include "wasm_interp.h"
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 #include "wamr_export.h"
-#include <unistd.h>
 extern int counter_;
 #endif
 
