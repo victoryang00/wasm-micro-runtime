@@ -18,6 +18,10 @@
 #include "aot_runtime.h"
 #endif
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#include "../../../../../include/wamr_export.h"
+#endif
+
 #define WAMR_PTHREAD_KEYS_MAX 32
 
 /* clang-format off */
