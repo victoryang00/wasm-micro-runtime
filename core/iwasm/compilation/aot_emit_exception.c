@@ -149,12 +149,6 @@ bool
 aot_compile_emit_fence_nop(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
 {
     LLVMValueRef value, inline_asm;
-    if (!(value = LLVMBuildFence(comp_ctx->builder,
-                                 LLVMAtomicOrderingSequentiallyConsistent,
-                                 false, ""))) {
-        aot_set_last_error("llvm build fence failed.");
-        return false;
-    }
 #if defined(_WIN32)
     LLVMTypeRef param_types[] = { comp_ctx->exec_env_type, LLVMInt32Type() };
     LLVMTypeRef ret_type = LLVMInt32Type();
@@ -170,7 +164,12 @@ aot_compile_emit_fence_nop(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx)
         return false;
     }
 #else
-
+    if (!(value = LLVMBuildFence(comp_ctx->builder,
+                                 LLVMAtomicOrderingSequentiallyConsistent,
+                                 false, ""))) {
+        aot_set_last_error("llvm build fence failed.");
+        return false;
+    }
     LLVMTypeRef ty = LLVMFunctionType(LLVMVoidType(), NULL, 0, false);
     char *asm_string;
     if (!strcmp(comp_ctx->target_arch, "x86_64")
