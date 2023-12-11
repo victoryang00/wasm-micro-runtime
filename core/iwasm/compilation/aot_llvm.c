@@ -2861,7 +2861,14 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
         }
 
         /* Set code model */
-        code_model = LLVMCodeModelSmall;
+        if (size_level == 0)
+            code_model = LLVMCodeModelLarge;
+        else if (size_level == 1)
+            code_model = LLVMCodeModelMedium;
+        else if (size_level == 2)
+            code_model = LLVMCodeModelKernel;
+        else
+            code_model = LLVMCodeModelSmall;
 
         /* Create the target machine */
         if (!(comp_ctx->target_machine = LLVMCreateTargetMachineWithOpts(
