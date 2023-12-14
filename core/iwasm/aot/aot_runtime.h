@@ -617,6 +617,9 @@ aot_table_grow(AOTModuleInstance *module_inst, uint32 tbl_idx,
 bool
 aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index);
 
+int
+aot_raise(WASMExecEnv *exec_env, int exception);
+
 void
 aot_free_frame(WASMExecEnv *exec_env);
 

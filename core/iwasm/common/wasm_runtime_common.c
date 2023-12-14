@@ -3248,7 +3248,7 @@ wasm_runtime_init_wasi(WASMModuleInstanceCommon *module_inst,
     uint32 i;
     bool ret = false;
 
-    ctx = runtime_malloc(sizeof(*ctx), module_inst, error_buf, error_buf_size);
+    ctx = runtime_malloc(sizeof(WASIContext), module_inst, error_buf, error_buf_size);
     if (!ctx)
         return false;
     uvwasi = &ctx->uvwasi;
