@@ -8327,11 +8327,6 @@ re_scan:
                               ->globals[global_idx
                                         - module->import_global_count]
                               .is_mutable;
-                if (!is_mutable) {
-                    set_error_buf(error_buf, error_buf_size,
-                                  "global is immutable");
-                    goto fail;
-                }
 
                 global_type =
                     global_idx < module->import_global_count
