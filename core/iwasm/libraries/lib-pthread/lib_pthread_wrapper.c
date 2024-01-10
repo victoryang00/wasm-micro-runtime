@@ -517,7 +517,7 @@ pthread_start_routine(void *arg)
     argv[0] = routine_args->arg;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->is_restore) {
-        wamr_wait();
+        wamr_wait(exec_env);
     }
 #endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
@@ -851,23 +851,34 @@ fail1:
     return -1;
 }
 
-static int32
+int32
 pthread_mutex_lock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
 {
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
     if (!info_node || info_node->type != T_MUTEX)
         return -1;
 
-    return os_mutex_lock(info_node->u.mutex);
+    int32 rc = os_mutex_lock(info_node->u.mutex);
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    if(!exec_env->is_restore){
+        insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_LOCK);
+    }
+#endif
+    return rc;
 }
 
-static int32
+int32
 pthread_mutex_unlock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
 {
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
     if (!info_node || info_node->type != T_MUTEX)
         return -1;
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    if(!exec_env->is_restore){
+        insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_UNLOCK);
+    }
+#endif
     return os_mutex_unlock(info_node->u.mutex);
 }
 
