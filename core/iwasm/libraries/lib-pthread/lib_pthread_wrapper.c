@@ -517,7 +517,7 @@ pthread_start_routine(void *arg)
     argv[0] = routine_args->arg;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->is_restore) {
-        wamr_wait();
+	    wamr_wait(exec_env);
     }
 #endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
@@ -685,12 +685,14 @@ pthread_join_wrapper(wasm_exec_env_t exec_env, uint32 thread,
     if (node->status != THREAD_EXIT) {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
         lightweight_checkpoint(exec_env);
-#endif
+        fprintf(stderr, "start join thread \n");
+        #endif
         /* if the thread is still running, call the platforms join API */
         join_ret = wasm_cluster_join_thread(target_exec_env, (void **)&ret);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+        printf("finish join thread \n");
         lightweight_uncheckpoint(exec_env);
-#endif
+        #endif
     }
     else {
         /* if the thread has exited, return stored results */
@@ -851,7 +853,7 @@ fail1:
     return -1;
 }
 
-static int32
+int32
 pthread_mutex_lock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
 {
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
@@ -861,7 +863,7 @@ pthread_mutex_lock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
     return os_mutex_lock(info_node->u.mutex);
 }
 
-static int32
+int32
 pthread_mutex_unlock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
 {
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
