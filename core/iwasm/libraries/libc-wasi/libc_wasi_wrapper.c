@@ -51,12 +51,10 @@ typedef struct wasi_prestat_app {
     wasi_preopentype_t pr_type;
     uint32 pr_name_len;
 } wasi_prestat_app_t;
-#if WASM_ENABLE_CHECKPOINT_RESTORE==0
 typedef struct iovec_app {
     uint32 buf_offset;
     uint32 buf_len;
 } iovec_app_t;
-#endif
 typedef struct WASIContext *wasi_ctx_t;
 
 wasi_ctx_t
@@ -588,7 +586,6 @@ wasi_fd_tell(wasm_exec_env_t exec_env, wasi_fd_t fd, wasi_filesize_t *newoffset)
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
     LOG_FATAL("wasi_fd_tell exec_env=%d, fd=%d, newoffset=%d \n", exec_env, fd, newoffset);
-    insert_fd(fd, "", 0, *newoffset, MVVM_FTELL);
 #endif
 
     return wasmtime_ssp_fd_tell(exec_env, curfds, fd, newoffset);
@@ -1372,7 +1369,8 @@ wasi_sock_bind(wasm_exec_env_t exec_env, wasi_fd_t fd, wasi_addr_t *addr)
 
         address.port = addr->addr.ip6.port;
     }
-    LOG_FATAL("wasi_sock_bind exec_env=%d, fd=%d, addr=%d \n", exec_env, fd, addr);
+    // first refer to the local cache
+    LOG_FATAL("wasi_sock_bind exec_env=%d, fd=%d, addr=%d  port=%d \n", exec_env, fd,addr->addr.ip4.addr.n0, addr->addr.ip4.port);
     //update socketfd addr
     update_socket_fd_address(fd, &address);
 #endif
@@ -1858,12 +1856,6 @@ wasi_sock_open(wasm_exec_env_t exec_env, wasi_fd_t poolfd,
     wasi_ctx_t wasi_ctx = get_wasi_ctx(module_inst);
     struct fd_table *curfds = NULL;
     int ret;
-
-#if WASM_ENABLE_CHECKPOINT_RESTORE!=0
-    // note: pass default protocol 0 - IP
-    if(sockfd)
-        insert_socket(*sockfd, af, socktype, 0);
-#endif
 
     if (!wasi_ctx)
         return __WASI_EACCES;
@@ -2371,13 +2363,34 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
     }
 
     memset(buf_begin, 0, total_size);
-
     *ro_data_len = 0;
+
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    LOG_FATAL("wasi_sock_recv_from exec_env=%d, sock=%d, ri_data=%d, "
+              "ri_data_len=%d, ri_flags=%d, ro_data_len=%d, ri_flags=%d \n",
+              exec_env, sock, ri_data, ri_data_len, ri_flags, ro_data_len,
+              ri_flags);
+    set_tcp();
+    if (exec_env->is_restore) {
+        replay_sock_recv_from_data(sock, &buf_begin, &ri_data_len);
+        if (ri_data_len == 0) {
+            err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
+                                              total_size, ri_flags, src_addr,
+                                              &recv_bytes);
+        }
+    }
+    else {
+        err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
+                                          total_size, ri_flags, src_addr,
+                                          &recv_bytes);
+    }
+#else
     err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin, total_size,
                                       ri_flags, src_addr, &recv_bytes);
+#endif
+
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
-    insert_sock_recv_from_data(sock, ri_data, ri_data_len, ri_flags, src_addr, ro_data_len);
-    LOG_FATAL("wasi_sock_recv_from exec_env=%d, sock=%d, \n ri_data:buf-offset=%u,  ri_data:buf-len=%u, \n ri_data_len=%d, ri_flags=%u, \n dest_addr:kind=%d, ip4= %u : %u : %u: %u, ip6= %u: %u : %u : %u : %u : %u : %u: %u \n ro_data_len=%d \n", exec_env, sock, ri_data->buf_offset, ri_data->buf_len, ri_data_len, ri_flags, src_addr->kind,
+    LOG_FATAL("wasi_sock_recv_from exec_env=%d, sock=%d, \n ri_data:buf-offset=%u,  ri_data:buf-len=%u, \n ri_data_len=%d, ri_flags=%u, \n src_addr:kind=%d, ip4= %u : %u : %u: %u, ip6= %u: %u : %u : %u : %u : %u : %u: %u \n ro_data_len=%d \n", exec_env, sock, ri_data->buf_offset, ri_data->buf_len, ri_data_len, ri_flags, src_addr->kind,
                src_addr->addr.ip4.addr.n0,
                src_addr->addr.ip4.addr.n1,
                src_addr->addr.ip4.addr.n2,
@@ -2484,6 +2497,7 @@ wasi_sock_send(wasm_exec_env_t exec_env, wasi_fd_t sock,
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
     LOG_FATAL("wasi_sock_send exec_env=%d, sock=%d, si_data=%d, si_data_len=%d, si_flags=%d, so_data_len=%d \n", exec_env, sock, si_data, si_data_len, si_flags, so_data_len);
+    set_tcp();
 #endif
 
     if (!wasi_ctx) {
@@ -2514,10 +2528,17 @@ wasi_sock_send_to(wasm_exec_env_t exec_env, wasi_fd_t sock,
                   wasi_siflags_t si_flags, const __wasi_addr_t *dest_addr,
                   uint32 *so_data_len)
 {
+    // send ack and maintain the syn?
     /**
      * si_data_len is the length of a list of iovec_app_t, which head is
      * si_data. so_data_len is the number of bytes sent
      **/
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (exec_env->is_restore) {
+        LOG_FATAL("wasi_sock_send_to exec_env=%d, sock=%d, si_data=%d, si_data_len=%d, si_flags=%d, dest_addr=%d, so_data_len=%d \n", exec_env, sock, si_data, si_data_len, si_flags, dest_addr, so_data_len);
+        set_tcp();
+    }
+#endif
     wasm_module_inst_t module_inst = get_module_inst(exec_env);
     wasi_ctx_t wasi_ctx = get_wasi_ctx(module_inst);
     struct fd_table *curfds = wasi_ctx_get_curfds(module_inst, wasi_ctx);
@@ -2545,7 +2566,7 @@ wasi_sock_send_to(wasm_exec_env_t exec_env, wasi_fd_t sock,
     *so_data_len = (uint32)send_bytes;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
-    insert_sock_send_to_data(sock, si_data, si_data_len, si_flags, dest_addr, so_data_len);
+    insert_sock_send_to_data(sock, buf, buf_size, si_flags, dest_addr);
     LOG_FATAL("wasi_sock_send_to exec_env=%d, sock=%d, \n si_data:buf-offset=%u,  si_data:buf-len=%u, \n si_data_len=%d, si_flags=%u, \n dest_addr:kind=%d, ip4= %u : %u : %u: %u, ip6= %u: %u : %u : %u : %u : %u : %u: %u \n so_data_len=%d \n", exec_env, sock, si_data->buf_offset, si_data->buf_len, si_data_len, si_flags, dest_addr->kind,
                dest_addr->addr.ip4.addr.n0,
                dest_addr->addr.ip4.addr.n1,
