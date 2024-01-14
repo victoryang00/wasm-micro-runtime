@@ -2370,7 +2370,6 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
               "ri_data_len=%d, ri_flags=%d, ro_data_len=%d, ri_flags=%d \n",
               exec_env, sock, ri_data, ri_data_len, ri_flags, ro_data_len,
               ri_flags);
-    set_tcp();
     if (exec_env->is_restore) {
         replay_sock_recv_from_data(sock, &buf_begin, &ri_data_len);
         if (ri_data_len == 0) {
@@ -2383,10 +2382,13 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
         err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
                                           total_size, ri_flags, src_addr,
                                           &recv_bytes);
+        insert_sock_recv_from_data(sock, buf_begin, total_size, ri_flags,
+                                   src_addr);
     }
 #else
-    err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin, total_size,
-                                      ri_flags, src_addr, &recv_bytes);
+    err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
+                                      total_size, ri_flags, src_addr,
+                                      &recv_bytes);
 #endif
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
@@ -2432,6 +2434,7 @@ wasi_sock_recv(wasm_exec_env_t exec_env, wasi_fd_t sock, iovec_app_t *ri_data,
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
     LOG_FATAL("wasi_sock_recv exec_env=%d, sock=%d, ri_data=%d, ri_data_len=%d, ri_flags=%d, ro_data_len=%d, ro_flags=%d \n", exec_env, sock, ri_data, ri_data_len, ri_flags, ro_data_len, ro_flags);
+    set_tcp();
 #endif
 
     if (!validate_native_addr(ro_flags, (uint32)sizeof(wasi_roflags_t)))

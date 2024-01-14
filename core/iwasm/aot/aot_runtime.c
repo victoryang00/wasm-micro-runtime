@@ -2964,8 +2964,9 @@ void
 aot_free_frame(WASMExecEnv *exec_env)
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    int func_index = ((AOTFrame *)exec_env->cur_frame)->func_index;
     fprintf(stderr, "aot_free_frame %zu %d\n",
-            ((AOTFrame *)exec_env->cur_frame)->func_index, gettid());
+            func_index, gettid());
 #endif
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
@@ -2977,6 +2978,15 @@ aot_free_frame(WASMExecEnv *exec_env)
 #endif
     wasm_exec_env_free_wasm_frame(exec_env, cur_frame);
     exec_env->cur_frame = (struct WASMInterpFrame *)prev_frame;
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (func_index== stop_func_index && is_debug) {
+        fprintf(stderr, "cur_func_count %d %d\n", cur_func_count, stop_func_threshold);
+        if (cur_func_count == stop_func_threshold) {
+            serialize_to_file(exec_env);
+        }
+        cur_func_count++;
+    }
+#endif
 }
 #endif /* end of WASM_ENABLE_AOT_STACK_FRAME != 0 */
 
