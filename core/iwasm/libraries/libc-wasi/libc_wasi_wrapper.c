@@ -2367,13 +2367,15 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->is_restore) {
-        replay_sock_recv_from_data(sock, &buf_begin, &ri_data_len);
+        replay_sock_recv_from_data(sock, &buf_begin, &recv_bytes, src_addr);
+        // printf("%p\n",src_addr);
         
-        if (ri_data_len == 0) {
+        if (recv_bytes == 0) {
             err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
                                               total_size, ri_flags, src_addr,
                                               &recv_bytes);
         } else {
+            fprintf(stderr,"replay_sock_recv_from_data: ri_data_len=%ld\n", recv_bytes);
             err = __WASI_ESUCCESS;
         }
     }
@@ -2381,7 +2383,7 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
         err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
                                           total_size, ri_flags, src_addr,
                                           &recv_bytes);
-        insert_sock_recv_from_data(sock, buf_begin, total_size, ri_flags,
+        insert_sock_recv_from_data(sock, buf_begin, recv_bytes, ri_flags,
                                    src_addr);
     }
 #else
@@ -2390,6 +2392,13 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
                                       &recv_bytes);
 #endif
 
+    if (err != __WASI_ESUCCESS) {
+        goto fail;
+    }
+    *ro_data_len = (uint32)recv_bytes;
+
+    err = copy_buffer_to_iovec_app(module_inst, buf_begin, (uint32)total_size,
+                                   ri_data, ri_data_len, (uint32)recv_bytes);
 #if WASM_ENABLE_CHECKPOINT_RESTORE!=0
     LOG_FATAL("wasi_sock_recv_from exec_env=%d, sock=%d, \n ri_data:buf-offset=%u,  ri_data:buf-len=%u, \n ri_data_len=%d, ri_flags=%u, \n src_addr:kind=%d, ip4= %u : %u : %u: %u, ip6= %u: %u : %u : %u : %u : %u : %u: %u \n ro_data_len=%d \n", exec_env, sock, ri_data->buf_offset, ri_data->buf_len, ri_data_len, ri_flags, src_addr->kind,
                src_addr->addr.ip4.addr.n0,
@@ -2404,17 +2413,8 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
                src_addr->addr.ip6.addr.h1,
                src_addr->addr.ip6.addr.h2,
                src_addr->addr.ip6.addr.h3,
-               ro_data_len);
+               *ro_data_len);
 #endif
-
-    if (err != __WASI_ESUCCESS) {
-        goto fail;
-    }
-    *ro_data_len = (uint32)recv_bytes;
-
-    err = copy_buffer_to_iovec_app(module_inst, buf_begin, (uint32)total_size,
-                                   ri_data, ri_data_len, (uint32)recv_bytes);
-
 fail:
     if (buf_begin) {
         wasm_runtime_free(buf_begin);

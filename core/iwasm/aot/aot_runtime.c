@@ -2881,7 +2881,7 @@ bool
 aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    fprintf(stderr, "aot_alloc_frame %u thread %d\n", func_index, gettid());
+    // fprintf(stderr, "aot_alloc_frame %u thread %d\n", func_index, gettid());
 #endif
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTModule *module = (AOTModule *)module_inst->module;
@@ -2902,7 +2902,6 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
         if (exec_env->call_chain_size == 0) {
             // TODO: fix memory leak
             exec_env->restore_call_chain = NULL;
-            exec_env->is_restore = false;
         }
         fprintf(stderr, "restore call chain %zu==%u, %p, %p, %d\n",
                 ((AOTFrame *)exec_env->cur_frame)->func_index, func_index,
@@ -2965,8 +2964,8 @@ aot_free_frame(WASMExecEnv *exec_env)
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     int func_index = ((AOTFrame *)exec_env->cur_frame)->func_index;
-    fprintf(stderr, "aot_free_frame %zu %d\n",
-            func_index, gettid());
+    // fprintf(stderr, "aot_free_frame %zu %d\n",
+    //         func_index, gettid());
 #endif
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
