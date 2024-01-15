@@ -2366,16 +2366,15 @@ wasi_sock_recv_from(wasm_exec_env_t exec_env, wasi_fd_t sock,
     *ro_data_len = 0;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    LOG_FATAL("wasi_sock_recv_from exec_env=%d, sock=%d, ri_data=%d, "
-              "ri_data_len=%d, ri_flags=%d, ro_data_len=%d, ri_flags=%d \n",
-              exec_env, sock, ri_data, ri_data_len, ri_flags, ro_data_len,
-              ri_flags);
     if (exec_env->is_restore) {
         replay_sock_recv_from_data(sock, &buf_begin, &ri_data_len);
+        
         if (ri_data_len == 0) {
             err = wasmtime_ssp_sock_recv_from(exec_env, curfds, sock, buf_begin,
                                               total_size, ri_flags, src_addr,
                                               &recv_bytes);
+        } else {
+            err = __WASI_ESUCCESS;
         }
     }
     else {
@@ -2531,17 +2530,10 @@ wasi_sock_send_to(wasm_exec_env_t exec_env, wasi_fd_t sock,
                   wasi_siflags_t si_flags, const __wasi_addr_t *dest_addr,
                   uint32 *so_data_len)
 {
-    // send ack and maintain the syn?
     /**
      * si_data_len is the length of a list of iovec_app_t, which head is
      * si_data. so_data_len is the number of bytes sent
      **/
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (exec_env->is_restore) {
-        LOG_FATAL("wasi_sock_send_to exec_env=%d, sock=%d, si_data=%d, si_data_len=%d, si_flags=%d, dest_addr=%d, so_data_len=%d \n", exec_env, sock, si_data, si_data_len, si_flags, dest_addr, so_data_len);
-        set_tcp();
-    }
-#endif
     wasm_module_inst_t module_inst = get_module_inst(exec_env);
     wasi_ctx_t wasi_ctx = get_wasi_ctx(module_inst);
     struct fd_table *curfds = wasi_ctx_get_curfds(module_inst, wasi_ctx);
