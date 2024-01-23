@@ -26,6 +26,9 @@ bool
 wasm_runtime_begin_blocking_op(wasm_exec_env_t env)
 {
     LOCK(env);
+    if (!ISSET(env, TERMINATE)) {
+        CLR(env, BLOCKING);
+    }
     bh_assert(!ISSET(env, BLOCKING));
     SET(env, BLOCKING);
     if (ISSET(env, TERMINATE)) {
