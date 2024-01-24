@@ -148,7 +148,7 @@ typedef struct WASMExecEnv {
     bool is_checkpoint;
     /* Whether is restore */
     bool is_restore;
-    ssize_t cur_count;
+    size_t cur_count;
     size_t call_chain_size;
     struct AOTFrame **restore_call_chain;
 
