@@ -334,8 +334,14 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
         if (timeout < 0) {
             /* wait forever until it is notified or terminatied
                here we keep waiting and checking every second */
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0 && WASM_ENABLE_THREAD_MGR != 0
+            lightweight_checkpoint(exec_env);
+#endif
             os_cond_reltimedwait(&wait_node->wait_cond, lock,
                                  (uint64)timeout_1sec);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0 && WASM_ENABLE_THREAD_MGR != 0
+            lightweight_uncheckpoint(exec_env);
+#endif
             if (wait_node->status == S_NOTIFIED /* notified by atomic.notify */
 #if WASM_ENABLE_THREAD_MGR != 0
                 /* terminated by other thread */

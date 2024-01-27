@@ -862,10 +862,15 @@ pthread_mutex_lock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
     if (!info_node || info_node->type != T_MUTEX)
         return -1;
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    lightweight_checkpoint(exec_env);
+#endif
 
     int32 rc = os_mutex_lock(info_node->u.mutex);
 #if WASM_ENABLE_CHECKPOINT_RESTORE !=0
     insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_LOCK);
+    lightweight_uncheckpoint(exec_env);
+    // TODO: lock around these two to make it atomic?
 #endif
     return rc;
 }
@@ -954,7 +959,14 @@ pthread_cond_wait_wrapper(wasm_exec_env_t exec_env, uint32 *cond, uint32 *mutex)
     if (!mutex_info_node || mutex_info_node->type != T_MUTEX)
         return -1;
 
-    return os_cond_wait(cond_info_node->u.cond, mutex_info_node->u.mutex);
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    lightweight_checkpoint(exec_env);
+#endif
+    int32 rc = os_cond_wait(cond_info_node->u.cond, mutex_info_node->u.mutex);
+#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+    lightweight_uncheckpoint(exec_env);
+#endif
+    return rc;
 }
 
 /**

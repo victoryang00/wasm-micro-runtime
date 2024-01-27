@@ -3720,7 +3720,6 @@ wasm_runtime_invoke_native(WASMExecEnv *exec_env, void *func_ptr,
     bool ret = false;
 #if WASM_ENABLE_REF_TYPES != 0
     bool is_aot_func = (NULL == signature);
-    // if(is_aot_func) lightweight_uncheckpoint();
 #endif
 #if !defined(BUILD_TARGET_RISCV32_ILP32) && !defined(BUILD_TARGET_ARC)
     uint32 *fps;
@@ -6158,13 +6157,15 @@ wasm_runtime_invoke_native_shim(WASMExecEnv *exec_env, void *func_ptr,
                                 uint32 *argv, uint32 argc, uint32 *argv_ret)
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    lightweight_checkpoint(exec_env);
+    // Commented because assuming native funcs are not blocking
+    //lightweight_checkpoint(exec_env);
 #endif
     bool ret =
         wasm_runtime_invoke_native(exec_env, func_ptr, func_type, signature,
                                    attachment, argv, argc, argv_ret);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    lightweight_uncheckpoint(exec_env);
+    // Commented because assuming native funcs are not blocking
+    //lightweight_uncheckpoint(exec_env);
 #endif
     return ret;
 }
