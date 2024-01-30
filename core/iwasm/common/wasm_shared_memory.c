@@ -255,7 +255,9 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
 #endif
     uint64 timeout_left, timeout_wait, timeout_1sec;
     bool check_ret, is_timeout, no_wait;
-
+    if (is_atomic_checkpointable()) {
+        serialize_to_file(exec_env);
+    }
     bh_assert(module->module_type == Wasm_Module_Bytecode
               || module->module_type == Wasm_Module_AoT);
 
@@ -334,13 +336,24 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
         if (timeout < 0) {
             /* wait forever until it is notified or terminatied
                here we keep waiting and checking every second */
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0 && WASM_ENABLE_THREAD_MGR != 0
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+            // if (has_atomic_address(address)) {
+            //     full_checkpoint(exec_env);
+            //     os_cond_reltimedwait(&wait_node->wait_cond, lock,
+            //                          (uint64)timeout_1sec);
+            // }
+            // else {
+            // append_atomic_address(address);
+
+        
             lightweight_checkpoint(exec_env);
 #endif
             os_cond_reltimedwait(&wait_node->wait_cond, lock,
                                  (uint64)timeout_1sec);
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0 && WASM_ENABLE_THREAD_MGR != 0
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
             lightweight_uncheckpoint(exec_env);
+            //     remove_atomic_address(address);
+            // }
 #endif
             if (wait_node->status == S_NOTIFIED /* notified by atomic.notify */
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -434,7 +447,7 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
 
     /* Notify each wait node in the wait list */
     notify_result = notify_wait_list(wait_info->wait_list, count);
-
+    printf("notify %p %d\n", address, count);
     os_mutex_unlock(lock);
 
     return notify_result;
