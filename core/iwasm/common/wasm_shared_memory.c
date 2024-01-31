@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
+#include "aot_runtime.h"
 #include "bh_log.h"
 #include "wasm_shared_memory.h"
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -255,9 +256,7 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
 #endif
     uint64 timeout_left, timeout_wait, timeout_1sec;
     bool check_ret, is_timeout, no_wait;
-    if (is_atomic_checkpointable()) {
-        serialize_to_file(exec_env);
-    }
+
     bh_assert(module->module_type == Wasm_Module_Bytecode
               || module->module_type == Wasm_Module_AoT);
 
@@ -337,20 +336,15 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
             /* wait forever until it is notified or terminatied
                here we keep waiting and checking every second */
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-            // if (has_atomic_address(address)) {
-            //     full_checkpoint(exec_env);
-            //     os_cond_reltimedwait(&wait_node->wait_cond, lock,
-            //                          (uint64)timeout_1sec);
-            // }
-            // else {
-            // append_atomic_address(address);
-
-        
+            // aot_free_frame(exec_env);
+            // if(is_atomic_checkpointable())
+            //     serialize_to_file(exec_env);
             lightweight_checkpoint(exec_env);
 #endif
             os_cond_reltimedwait(&wait_node->wait_cond, lock,
                                  (uint64)timeout_1sec);
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+            // aot_alloc_frame(exec_env, 278);
             lightweight_uncheckpoint(exec_env);
             //     remove_atomic_address(address);
             // }

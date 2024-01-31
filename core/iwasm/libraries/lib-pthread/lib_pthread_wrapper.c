@@ -516,6 +516,7 @@ pthread_start_routine(void *arg)
     wasm_exec_env_set_thread_info(exec_env);
     argv[0] = routine_args->arg;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    register_sigtrap();
     if (exec_env->is_restore) {
 	    wamr_wait(exec_env);
     }
@@ -637,9 +638,7 @@ pthread_create_wrapper(wasm_exec_env_t exec_env,
 
     if (thread)
         *thread = thread_handle;
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    register_sigtrap();
-#endif
+
     return 0;
 
 fail:

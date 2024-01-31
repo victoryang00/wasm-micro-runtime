@@ -14,6 +14,9 @@
 #if WASM_ENABLE_AOT != 0
 #include "aot_runtime.h"
 #endif
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../include/wamr_export.h"
+#endif
 
 static const char *THREAD_START_FUNCTION = "wasi_thread_start";
 static korp_mutex thread_id_lock;
@@ -57,6 +60,14 @@ thread_start(void *arg)
     argv[0] = thread_arg->thread_id;
     argv[1] = thread_arg->arg;
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    exec_env->cur_count = gettid();
+    insert_tid_start_arg(gettid(),thread_arg->arg);
+    register_sigtrap();
+    if (exec_env->is_restore) {
+        wamr_wait(exec_env);
+    }
+#endif
     if (!wasm_runtime_call_wasm(exec_env, thread_arg->start_func, 2, argv)) {
         /* Exception has already been spread during throwing */
     }
@@ -69,7 +80,7 @@ thread_start(void *arg)
     return NULL;
 }
 
-static int32
+int32
 thread_spawn_wrapper(wasm_exec_env_t exec_env, uint32 start_arg)
 {
     wasm_module_t module = wasm_exec_env_get_module(exec_env);
