@@ -523,6 +523,7 @@ pthread_start_routine(void *arg)
     else{
 	    exec_env->cur_count = gettid();
     }
+    change_thread_id_to_child(exec_env->cur_count, routine_args->arg);
 #endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
                                     argv)) {
@@ -620,7 +621,9 @@ pthread_create_wrapper(wasm_exec_env_t exec_env,
     routine_args->elem_index = elem_index;
     routine_args->info_node = info_node;
     routine_args->module_inst = new_module_inst;
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    insert_parent_child(exec_env->cur_count, routine_args->arg);
+#endif
     os_mutex_lock(&exec_env->wait_lock);
     ret =
         wasm_cluster_create_thread(exec_env, new_module_inst, true,

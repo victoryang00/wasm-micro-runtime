@@ -2230,7 +2230,7 @@ aot_call_indirect(WASMExecEnv *exec_env, uint32 tbl_idx, uint32 table_elem_idx,
 
     func_idx = tbl_inst->elems[table_elem_idx];
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (exec_env->is_restore) {
+    if (exec_env->is_restore && exec_env->restore_call_chain) {
         struct AOTFrame *rcc = *(exec_env->restore_call_chain);
         while (rcc->prev_frame) {
             rcc = rcc->prev_frame;
