@@ -523,7 +523,7 @@ pthread_start_routine(void *arg)
     else{
 	    exec_env->cur_count = gettid();
     }
-    change_thread_id_to_child(exec_env->cur_count, routine_args->arg);
+    change_thread_id_to_child(gettid(), routine_args->arg);
 #endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
                                     argv)) {

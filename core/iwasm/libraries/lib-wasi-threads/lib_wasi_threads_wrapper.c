@@ -61,8 +61,8 @@ thread_start(void *arg)
     argv[1] = thread_arg->arg;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_tid_start_arg(exec_env->cur_count, thread_arg->arg);
-    change_thread_id_to_child(exec_env->cur_count, thread_arg->thread_id);
+    insert_tid_start_arg(gettid(), thread_arg->arg);
+    change_thread_id_to_child(gettid(), thread_arg->thread_id);
     register_sigtrap();
     if (exec_env->is_restore) {
         wamr_wait(exec_env);
