@@ -5,6 +5,8 @@
 
 #include "aot_runtime.h"
 #include "bh_log.h"
+#include "wasm_exec_env.h"
+#include "wasm_runtime_common.h"
 #include "wasm_shared_memory.h"
 #if WASM_ENABLE_THREAD_MGR != 0
 #include "../libraries/thread-mgr/thread_manager.h"
@@ -286,6 +288,9 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     exec_env =
         wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
     bh_assert(exec_env);
+    // if ((((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data)>3748){
+    //     return 0;
+    // }
 #endif
 
     lock = shared_memory_get_lock_pointer(module_inst->memories[0]);
@@ -299,12 +304,14 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
 
     if (no_wait) {
         os_mutex_unlock(lock);
+    fprintf(stderr,"no_wait %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
         return 1;
     }
 
     if (!(wait_node = wasm_runtime_malloc(sizeof(AtomicWaitNode)))) {
         os_mutex_unlock(lock);
         wasm_runtime_set_exception(module, "failed to create wait node");
+    fprintf(stderr,"wait_node %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
         return -1;
     }
     memset(wait_node, 0, sizeof(AtomicWaitNode));
@@ -313,6 +320,7 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
         os_mutex_unlock(lock);
         wasm_runtime_free(wait_node);
         wasm_runtime_set_exception(module, "failed to init wait cond");
+    fprintf(stderr,"os_cond_init %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
         return -1;
     }
 
@@ -332,6 +340,7 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     /* unit of timeout is nsec, convert it to usec */
     timeout_left = (uint64)timeout / 1000;
     timeout_1sec = (uint64)1e6;
+    fprintf(stderr,"wait %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
 
     while (1) {
         if (timeout < 0) {
@@ -408,7 +417,12 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
 
     bh_assert(module->module_type == Wasm_Module_Bytecode
               || module->module_type == Wasm_Module_AoT);
-
+#if WASM_ENABLE_THREAD_MGR != 0
+   WASMExecEnv* exec_env =
+        wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
+    bh_assert(exec_env);
+    fprintf(stderr,"notify %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
+#endif
     shared_memory_lock(module_inst->memories[0]);
     out_of_bounds =
         ((uint8 *)address < module_inst->memories[0]->memory_data

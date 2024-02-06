@@ -61,13 +61,11 @@ thread_start(void *arg)
     argv[1] = thread_arg->arg;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_tid_start_arg(gettid(), thread_arg->arg);
-    change_thread_id_to_child(gettid(), thread_arg->thread_id);
+    insert_tid_start_arg(exec_env->handle, thread_arg->arg, thread_arg->thread_id);
+    change_thread_id_to_child(exec_env->handle, thread_arg->thread_id);
     register_sigtrap();
     if (exec_env->is_restore) {
         wamr_wait(exec_env);
-    } else {
-        exec_env->cur_count = gettid();
     }
 #endif
     if (!wasm_runtime_call_wasm(exec_env, thread_arg->start_func, 2, argv)) {
@@ -130,7 +128,11 @@ thread_spawn_wrapper(wasm_exec_env_t exec_env, uint32 start_arg)
         goto thread_preparation_fail;
     }
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_parent_child(exec_env->cur_count, thread_start_arg->thread_id);
+    ssize_t parent_handle = 0;
+    if(exec_env->thread_arg){
+        parent_handle = ((ThreadStartArg*)exec_env->thread_arg)->thread_id;
+    }
+    insert_parent_child(parent_handle, thread_start_arg->thread_id);
 #endif
     thread_start_arg->arg = start_arg;
     thread_start_arg->start_func = start_func;

@@ -520,10 +520,6 @@ pthread_start_routine(void *arg)
     if (exec_env->is_restore) {
 	    wamr_wait(exec_env);
     }
-    else{
-	    exec_env->cur_count = gettid();
-    }
-    change_thread_id_to_child(gettid(), routine_args->arg);
 #endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
                                     argv)) {
@@ -622,7 +618,7 @@ pthread_create_wrapper(wasm_exec_env_t exec_env,
     routine_args->info_node = info_node;
     routine_args->module_inst = new_module_inst;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_parent_child(exec_env->cur_count, routine_args->arg);
+    insert_parent_child(exec_env->handle, routine_args->arg);
 #endif
     os_mutex_lock(&exec_env->wait_lock);
     ret =
@@ -870,8 +866,9 @@ pthread_mutex_lock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
 
     int32 rc = os_mutex_lock(info_node->u.mutex);
 #if WASM_ENABLE_CHECKPOINT_RESTORE !=0
-    insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_LOCK);
     lightweight_uncheckpoint(exec_env);
+    insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_LOCK);
+
     // TODO: lock around these two to make it atomic?
 #endif
     return rc;

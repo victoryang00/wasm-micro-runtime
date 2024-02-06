@@ -2978,8 +2978,9 @@ aot_free_frame(WASMExecEnv *exec_env)
     wasm_exec_env_free_wasm_frame(exec_env, cur_frame);
     exec_env->cur_frame = (struct WASMInterpFrame *)prev_frame;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (func_index== stop_func_index && is_debug) {
-        fprintf(stderr, "cur_func_count %d %d\n", cur_func_count, stop_func_threshold);
+    if (func_index == stop_func_index && is_debug) {
+        fprintf(stderr, "cur_func_count %d %d\n", cur_func_count,
+                stop_func_threshold);
         if (cur_func_count == stop_func_threshold) {
             serialize_to_file(exec_env);
         }

@@ -4701,7 +4701,7 @@ wasm_runtime_call_indirect(WASMExecEnv *exec_env, uint32 element_index,
                            uint32 argc, uint32 argv[])
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    fprintf(stderr, "wasm_runtime_call_indirect from %d\n", gettid());
+    // LOG_DEBUG("wasm_runtime_call_indirect from %d\n", gettid());
 #endif
     bool ret = false;
 
