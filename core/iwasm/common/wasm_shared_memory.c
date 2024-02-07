@@ -288,9 +288,6 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     exec_env =
         wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
     bh_assert(exec_env);
-    // if ((((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data)>3748){
-    //     return 0;
-    // }
 #endif
 
     lock = shared_memory_get_lock_pointer(module_inst->memories[0]);
@@ -304,14 +301,12 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
 
     if (no_wait) {
         os_mutex_unlock(lock);
-    fprintf(stderr,"no_wait %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
         return 1;
     }
 
     if (!(wait_node = wasm_runtime_malloc(sizeof(AtomicWaitNode)))) {
         os_mutex_unlock(lock);
         wasm_runtime_set_exception(module, "failed to create wait node");
-    fprintf(stderr,"wait_node %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
         return -1;
     }
     memset(wait_node, 0, sizeof(AtomicWaitNode));
@@ -320,7 +315,6 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
         os_mutex_unlock(lock);
         wasm_runtime_free(wait_node);
         wasm_runtime_set_exception(module, "failed to init wait cond");
-    fprintf(stderr,"os_cond_init %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
         return -1;
     }
 
@@ -340,25 +334,28 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     /* unit of timeout is nsec, convert it to usec */
     timeout_left = (uint64)timeout / 1000;
     timeout_1sec = (uint64)1e6;
-    fprintf(stderr,"wait %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
-
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (!exec_env->is_restore) {
+        LOG_DEBUG("wait %p %ld %ld %ld %d\n", address,
+                  ((uint8 *)address)
+                      - ((WASMModuleInstance *)exec_env->module_inst)
+                            ->memories[0]
+                            ->memory_data,
+                  expect, timeout, wait64);
+        insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_WAIT);
+    }
+#endif
     while (1) {
         if (timeout < 0) {
             /* wait forever until it is notified or terminatied
                here we keep waiting and checking every second */
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-            // aot_free_frame(exec_env);
-            // if(is_atomic_checkpointable())
-            //     serialize_to_file(exec_env);
             lightweight_checkpoint(exec_env);
 #endif
             os_cond_reltimedwait(&wait_node->wait_cond, lock,
                                  (uint64)timeout_1sec);
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-            // aot_alloc_frame(exec_env, 278);
             lightweight_uncheckpoint(exec_env);
-            //     remove_atomic_address(address);
-            // }
 #endif
             if (wait_node->status == S_NOTIFIED /* notified by atomic.notify */
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -417,12 +414,7 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
 
     bh_assert(module->module_type == Wasm_Module_Bytecode
               || module->module_type == Wasm_Module_AoT);
-#if WASM_ENABLE_THREAD_MGR != 0
-   WASMExecEnv* exec_env =
-        wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
-    bh_assert(exec_env);
-    fprintf(stderr,"notify %p %ld\n", address, ((uint8*)address)-((WASMModuleInstance*)exec_env->module_inst)->memories[0]->memory_data);
-#endif
+
     shared_memory_lock(module_inst->memories[0]);
     out_of_bounds =
         ((uint8 *)address < module_inst->memories[0]->memory_data
@@ -454,10 +446,20 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
         os_mutex_unlock(lock);
         return 0;
     }
-
+#if WASM_ENABLE_THREAD_MGR != 0
+    WASMExecEnv *exec_env =
+        wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
+    bh_assert(exec_env);
+    LOG_DEBUG("notify %p %ld %d\n", address,
+              ((uint8 *)address)
+                  - ((WASMModuleInstance *)exec_env->module_inst)
+                        ->memories[0]
+                        ->memory_data,
+              count);
+    insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_NOTIFY);
+#endif
     /* Notify each wait node in the wait list */
     notify_result = notify_wait_list(wait_info->wait_list, count);
-    printf("notify %p %d\n", address, count);
     os_mutex_unlock(lock);
 
     return notify_result;

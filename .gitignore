@@ -43,3 +43,4 @@ samples/workload/include/**
 # core/iwasm/libraries/wasi-threads
 CMakeCache*
 samples/socket-api/*
+*.swp

@@ -9,6 +9,7 @@
 #include "../common/wasm_runtime_common.h"
 #include "../common/wasm_memory.h"
 #include "../interpreter/wasm_runtime.h"
+#include "wasm_exec_env.h"
 #if WASM_ENABLE_SHARED_MEMORY != 0
 #include "../common/wasm_shared_memory.h"
 #endif
@@ -1343,67 +1344,78 @@ aot_deinstantiate(AOTModuleInstance *module_inst, bool is_sub_inst)
 {
     WASMModuleInstanceExtraCommon *common =
         &((AOTModuleInstanceExtra *)module_inst->e)->common;
-    if (module_inst->exec_env_singleton) {
-        /* wasm_exec_env_destroy will call
-           wasm_cluster_wait_for_all_except_self to wait for other
-           threads, so as to destroy their exec_envs and module
-           instances first, and avoid accessing the shared resources
-           of current module instance after it is deinstantiated. */
-        wasm_exec_env_destroy((WASMExecEnv *)module_inst->exec_env_singleton);
-    }
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    WASMExecEnv *exec_env =
+        wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
+    bh_assert(exec_env);
+    if (!exec_env->is_restore) {
+#endif
+        if (module_inst->exec_env_singleton) {
+            /* wasm_exec_env_destroy will call
+               wasm_cluster_wait_for_all_except_self to wait for other
+               threads, so as to destroy their exec_envs and module
+               instances first, and avoid accessing the shared resources
+               of current module instance after it is deinstantiated. */
+            wasm_exec_env_destroy(
+                (WASMExecEnv *)module_inst->exec_env_singleton);
+        }
 
 #if WASM_ENABLE_PERF_PROFILING != 0
-    if (module_inst->func_perf_profilings)
-        wasm_runtime_free(module_inst->func_perf_profilings);
+        if (module_inst->func_perf_profilings)
+            wasm_runtime_free(module_inst->func_perf_profilings);
 #endif
 
 #if WASM_ENABLE_DUMP_CALL_STACK != 0
-    if (module_inst->frames) {
-        destroy_c_api_frames(module_inst->frames);
-        wasm_runtime_free(module_inst->frames);
-        module_inst->frames = NULL;
-    }
+        if (module_inst->frames) {
+            destroy_c_api_frames(module_inst->frames);
+            wasm_runtime_free(module_inst->frames);
+            module_inst->frames = NULL;
+        }
 #endif
 
 #if WASM_ENABLE_MULTI_MODULE != 0
-    wasm_runtime_sub_module_deinstantiate(
-        (WASMModuleInstanceCommon *)module_inst);
+        wasm_runtime_sub_module_deinstantiate(
+            (WASMModuleInstanceCommon *)module_inst);
 #endif
 
-    if (module_inst->tables)
-        wasm_runtime_free(module_inst->tables);
+        if (module_inst->tables)
+            wasm_runtime_free(module_inst->tables);
 
-    if (module_inst->memories)
-        memories_deinstantiate(module_inst);
+        if (module_inst->memories)
+            memories_deinstantiate(module_inst);
 
-    if (module_inst->export_functions)
-        wasm_runtime_free(module_inst->export_functions);
+        if (module_inst->export_functions)
+            wasm_runtime_free(module_inst->export_functions);
 
-    if (module_inst->func_ptrs)
-        wasm_runtime_free(module_inst->func_ptrs);
+        if (module_inst->func_ptrs)
+            wasm_runtime_free(module_inst->func_ptrs);
 
-    if (module_inst->func_type_indexes)
-        wasm_runtime_free(module_inst->func_type_indexes);
+        if (module_inst->func_type_indexes)
+            wasm_runtime_free(module_inst->func_type_indexes);
 
-    if (common->c_api_func_imports)
-        wasm_runtime_free(((AOTModuleInstanceExtra *)module_inst->e)
-                              ->common.c_api_func_imports);
+        if (common->c_api_func_imports)
+            wasm_runtime_free(((AOTModuleInstanceExtra *)module_inst->e)
+                                  ->common.c_api_func_imports);
 
-    if (!is_sub_inst) {
+        if (!is_sub_inst) {
 #if WASM_ENABLE_WASI_NN != 0
-        wasi_nn_destroy(module_inst);
+            wasi_nn_destroy(module_inst);
 #endif
-        wasm_native_call_context_dtors((WASMModuleInstanceCommon *)module_inst);
-    }
+            wasm_native_call_context_dtors(
+                (WASMModuleInstanceCommon *)module_inst);
+        }
 
 #if WASM_ENABLE_BULK_MEMORY != 0
-    bh_bitmap_delete(common->data_dropped);
+        bh_bitmap_delete(common->data_dropped);
 #endif
 #if WASM_ENABLE_REF_TYPES != 0
-    bh_bitmap_delete(common->elem_dropped);
+        bh_bitmap_delete(common->elem_dropped);
 #endif
 
-    wasm_runtime_free(module_inst);
+        wasm_runtime_free(module_inst);
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    }
+#endif
 }
 
 AOTFunctionInstance *
@@ -2235,8 +2247,8 @@ aot_call_indirect(WASMExecEnv *exec_env, uint32 tbl_idx, uint32 table_elem_idx,
         while (rcc->prev_frame) {
             rcc = rcc->prev_frame;
         }
-        LOG_DEBUG("func_idx: %d instead of %d of thread %d\n", rcc->func_index,
-                  func_idx, gettid());
+        LOG_DEBUG("func_idx: %d instead of %d of thread %ld\n", rcc->func_index,
+                  func_idx, exec_env->handle);
         func_idx = rcc->func_index;
     }
 #endif
@@ -2881,7 +2893,7 @@ bool
 aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    // fprintf(stderr, "aot_alloc_frame %u thread %d\n", func_index, gettid());
+    LOG_DEBUG("aot_alloc_frame %u thread %d\n", func_index, gettid());
 #endif
     AOTModuleInstance *module_inst = (AOTModuleInstance *)exec_env->module_inst;
     AOTModule *module = (AOTModule *)module_inst->module;
@@ -2895,7 +2907,7 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->restore_call_chain) {
         frame = exec_env->restore_call_chain[exec_env->call_chain_size - 1];
-        // fprintf(stderr, "frame restored, func idx %zu\n", frame->func_index);
+        LOG_DEBUG("frame restored, func idx %zu\n", frame->func_index);
         exec_env->call_chain_size--;
         frame->prev_frame = (AOTFrame *)exec_env->cur_frame;
         exec_env->cur_frame = (struct WASMInterpFrame *)frame;
@@ -2903,14 +2915,13 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
             // TODO: fix memory leak
             exec_env->restore_call_chain = NULL;
         }
-        fprintf(stderr, "restore call chain %zu==%u, %p, %p, %d\n",
-                ((AOTFrame *)exec_env->cur_frame)->func_index, func_index,
-                exec_env, exec_env->restore_call_chain, gettid());
+        LOG_DEBUG("restore call chain %zu==%u, %p, %p, %d\n",
+                  ((AOTFrame *)exec_env->cur_frame)->func_index, func_index,
+                  exec_env, exec_env->restore_call_chain, gettid());
         if (((AOTFrame *)exec_env->cur_frame)->func_index != func_index) {
-            fprintf(stderr, "NOT MATCH!!!\n");
+            LOG_DEBUG("NOT MATCH!!!\n");
             exit(1);
         }
-
         return true;
     }
 #endif
@@ -2964,8 +2975,7 @@ aot_free_frame(WASMExecEnv *exec_env)
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     int func_index = ((AOTFrame *)exec_env->cur_frame)->func_index;
-    // fprintf(stderr, "aot_free_frame %zu %d\n",
-    //         func_index, gettid());
+    LOG_DEBUG("aot_free_frame %zu %d\n", func_index, gettid());
 #endif
     AOTFrame *cur_frame = (AOTFrame *)exec_env->cur_frame;
     AOTFrame *prev_frame = cur_frame->prev_frame;
@@ -2979,8 +2989,8 @@ aot_free_frame(WASMExecEnv *exec_env)
     exec_env->cur_frame = (struct WASMInterpFrame *)prev_frame;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (func_index == stop_func_index && is_debug) {
-        fprintf(stderr, "cur_func_count %d %d\n", cur_func_count,
-                stop_func_threshold);
+        LOG_DEBUG("cur_func_count %d %d\n", cur_func_count,
+                  stop_func_threshold);
         if (cur_func_count == stop_func_threshold) {
             serialize_to_file(exec_env);
         }

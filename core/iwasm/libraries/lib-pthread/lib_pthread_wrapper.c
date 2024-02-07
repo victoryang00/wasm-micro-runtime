@@ -18,7 +18,7 @@
 #include "aot_runtime.h"
 #endif
 
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
 #include "../../../../../include/wamr_export.h"
 #endif
 
@@ -518,7 +518,7 @@ pthread_start_routine(void *arg)
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     register_sigtrap();
     if (exec_env->is_restore) {
-	    wamr_wait(exec_env);
+        wamr_wait(exec_env);
     }
 #endif
     if (!wasm_runtime_call_indirect(exec_env, routine_args->elem_index, 1,
@@ -686,14 +686,14 @@ pthread_join_wrapper(wasm_exec_env_t exec_env, uint32 thread,
     if (node->status != THREAD_EXIT) {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
         lightweight_checkpoint(exec_env);
-        fprintf(stderr, "start join thread \n");
-        #endif
+        LOG_DEBUG("start join thread \n");
+#endif
         /* if the thread is still running, call the platforms join API */
         join_ret = wasm_cluster_join_thread(target_exec_env, (void **)&ret);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
         printf("finish join thread \n");
         lightweight_uncheckpoint(exec_env);
-        #endif
+#endif
     }
     else {
         /* if the thread has exited, return stored results */
@@ -860,16 +860,14 @@ pthread_mutex_lock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
     if (!info_node || info_node->type != T_MUTEX)
         return -1;
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     lightweight_checkpoint(exec_env);
 #endif
 
     int32 rc = os_mutex_lock(info_node->u.mutex);
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     lightweight_uncheckpoint(exec_env);
     insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_LOCK);
-
-    // TODO: lock around these two to make it atomic?
 #endif
     return rc;
 }
@@ -880,7 +878,7 @@ pthread_mutex_unlock_wrapper(wasm_exec_env_t exec_env, uint32 *mutex)
     ThreadInfoNode *info_node = get_thread_info(exec_env, *mutex);
     if (!info_node || info_node->type != T_MUTEX)
         return -1;
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     insert_sync_op(exec_env, mutex, SYNC_OP_MUTEX_UNLOCK);
 #endif
     return os_mutex_unlock(info_node->u.mutex);
@@ -945,7 +943,7 @@ fail1:
     return -1;
 }
 
-static int32
+int32
 pthread_cond_wait_wrapper(wasm_exec_env_t exec_env, uint32 *cond, uint32 *mutex)
 {
     ThreadInfoNode *cond_info_node, *mutex_info_node;
@@ -958,11 +956,11 @@ pthread_cond_wait_wrapper(wasm_exec_env_t exec_env, uint32 *cond, uint32 *mutex)
     if (!mutex_info_node || mutex_info_node->type != T_MUTEX)
         return -1;
 
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     lightweight_checkpoint(exec_env);
 #endif
     int32 rc = os_cond_wait(cond_info_node->u.cond, mutex_info_node->u.mutex);
-#if WASM_ENABLE_CHECKPOINT_RESTORE !=0
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     lightweight_uncheckpoint(exec_env);
 #endif
     return rc;
@@ -990,7 +988,7 @@ pthread_cond_timedwait_wrapper(wasm_exec_env_t exec_env, uint32 *cond,
                                 mutex_info_node->u.mutex, useconds);
 }
 
-static int32
+int32
 pthread_cond_signal_wrapper(wasm_exec_env_t exec_env, uint32 *cond)
 {
     ThreadInfoNode *info_node = get_thread_info(exec_env, *cond);
@@ -1000,7 +998,7 @@ pthread_cond_signal_wrapper(wasm_exec_env_t exec_env, uint32 *cond)
     return os_cond_signal(info_node->u.cond);
 }
 
-static int32
+int32
 pthread_cond_broadcast_wrapper(wasm_exec_env_t exec_env, uint32 *cond)
 {
     ThreadInfoNode *info_node = get_thread_info(exec_env, *cond);
