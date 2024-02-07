@@ -596,10 +596,7 @@ thread_manager_start_routine(void *arg)
     os_mutex_lock(&exec_env->wait_lock);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     ssize_t old_handle = exec_env->handle;
-#endif
-    exec_env->handle = os_self_thread();
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    wamr_handle_map(old_handle, exec_env->handle);
+    wamr_handle_map(old_handle, os_self_thread());
 #endif
     /* Notify the parent thread to continue running */
     os_cond_signal(&exec_env->wait_cond);

@@ -336,12 +336,12 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     timeout_1sec = (uint64)1e6;
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (!exec_env->is_restore) {
-        LOG_DEBUG("wait %p %ld %ld %ld %d\n", address,
-                  ((uint8 *)address)
-                      - ((WASMModuleInstance *)exec_env->module_inst)
-                            ->memories[0]
-                            ->memory_data,
-                  expect, timeout, wait64);
+        printf("wait %p %ld %ld %ld %d\n", address,
+               ((uint8 *)address)
+                   - ((WASMModuleInstance *)exec_env->module_inst)
+                         ->memories[0]
+                         ->memory_data,
+               expect, timeout, wait64);
         insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_WAIT);
     }
 #endif
@@ -446,17 +446,19 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
         os_mutex_unlock(lock);
         return 0;
     }
-#if WASM_ENABLE_THREAD_MGR != 0
-    WASMExecEnv *exec_env =
-        wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
-    bh_assert(exec_env);
-    LOG_DEBUG("notify %p %ld %d\n", address,
-              ((uint8 *)address)
-                  - ((WASMModuleInstance *)exec_env->module_inst)
-                        ->memories[0]
-                        ->memory_data,
-              count);
-    insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_NOTIFY);
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+        WASMExecEnv *exec_env = wasm_clusters_search_exec_env(
+            (WASMModuleInstanceCommon *)module_inst);
+    if (!exec_env->is_restore) {
+        bh_assert(exec_env);
+        printf("notify %p %ld %d\n", address,
+               ((uint8 *)address)
+                   - ((WASMModuleInstance *)exec_env->module_inst)
+                         ->memories[0]
+                         ->memory_data,
+               count);
+        insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_NOTIFY);
+    }
 #endif
     /* Notify each wait node in the wait list */
     notify_result = notify_wait_list(wait_info->wait_list, count);

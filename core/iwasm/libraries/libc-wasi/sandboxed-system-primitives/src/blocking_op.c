@@ -50,11 +50,11 @@ blocking_op_writev(wasm_exec_env_t exec_env, os_file_handle handle,
                    const struct __wasi_ciovec_t *iov, int iovcnt,
                    size_t *nwritten)
 {
-    // if (!wasm_runtime_begin_blocking_op(exec_env)) {
-    //     return __WASI_EINTR;
-    // }
+    if (!wasm_runtime_begin_blocking_op(exec_env)) {
+        return __WASI_EINTR;
+    }
     __wasi_errno_t error = os_writev(handle, iov, iovcnt, nwritten);
-    // wasm_runtime_end_blocking_op(exec_env);
+    wasm_runtime_end_blocking_op(exec_env);
     return error;
 }
 

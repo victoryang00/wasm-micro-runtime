@@ -61,7 +61,8 @@ thread_start(void *arg)
     argv[1] = thread_arg->arg;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_tid_start_arg(exec_env->handle, thread_arg->arg, thread_arg->thread_id);
+    insert_tid_start_arg(exec_env->handle, thread_arg->arg,
+                         thread_arg->thread_id);
     change_thread_id_to_child(exec_env->handle, thread_arg->thread_id);
     register_sigtrap();
     if (exec_env->is_restore) {
@@ -73,6 +74,7 @@ thread_start(void *arg)
     }
 
     // Routine exit
+    printf("Thread %d exits", thread_arg->thread_id); // free parrent
     deallocate_thread_id(thread_arg->thread_id);
     wasm_runtime_free(thread_arg);
     exec_env->thread_arg = NULL;
@@ -129,8 +131,8 @@ thread_spawn_wrapper(wasm_exec_env_t exec_env, uint32 start_arg)
     }
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     ssize_t parent_handle = 0;
-    if(exec_env->thread_arg){
-        parent_handle = ((ThreadStartArg*)exec_env->thread_arg)->thread_id;
+    if (exec_env->thread_arg) {
+        parent_handle = ((ThreadStartArg *)exec_env->thread_arg)->thread_id;
     }
     insert_parent_child(parent_handle, thread_start_arg->thread_id);
 #endif

@@ -6158,14 +6158,14 @@ wasm_runtime_invoke_native_shim(WASMExecEnv *exec_env, void *func_ptr,
 {
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     // Commented because assuming native funcs are not blocking
-    //lightweight_checkpoint(exec_env);
+    lightweight_checkpoint(exec_env);
 #endif
     bool ret =
         wasm_runtime_invoke_native(exec_env, func_ptr, func_type, signature,
                                    attachment, argv, argc, argv_ret);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     // Commented because assuming native funcs are not blocking
-    //lightweight_uncheckpoint(exec_env);
+    lightweight_uncheckpoint(exec_env);
 #endif
     return ret;
 }
