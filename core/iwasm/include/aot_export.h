@@ -6,6 +6,7 @@
 #ifndef _AOT_EXPORT_H
 #define _AOT_EXPORT_H
 
+#include "wasm.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -20,7 +21,7 @@ struct AOTCompContext;
 typedef struct AOTCompContext *aot_comp_context_t;
 
 aot_comp_data_t
-aot_create_comp_data(void *wasm_module);
+aot_create_comp_data(WASMModule *wasm_module);
 
 void
 aot_destroy_comp_data(aot_comp_data_t comp_data);

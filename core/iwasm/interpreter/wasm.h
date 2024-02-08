@@ -334,7 +334,6 @@ typedef struct BlockAddr {
     uint8 *end_addr;
 } BlockAddr;
 
-#if WASM_ENABLE_LIBC_WASI != 0
 typedef struct WASIArguments {
     const char **dir_list;
     uint32 dir_count;
@@ -351,7 +350,6 @@ typedef struct WASIArguments {
     uint32 argc;
     os_raw_file_handle stdio[3];
 } WASIArguments;
-#endif
 
 typedef struct StringNode {
     struct StringNode *next;

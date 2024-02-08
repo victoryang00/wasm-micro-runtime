@@ -428,9 +428,9 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
             ExitOnErr(PB.parsePassPipeline(MPM, comp_ctx->llvm_passes));
         }
 
-        if (OptimizationLevel::O0 == OL) {
-            MPM.addPass(PB.buildO0DefaultPipeline(OL));
-        }
+        // if (OptimizationLevel::O0 == OL) {
+        //     MPM.addPass(PB.buildO0DefaultPipeline(OL));
+        // }
         else {
             if (!disable_llvm_lto) {
                 /* Apply LTO for AOT mode */
