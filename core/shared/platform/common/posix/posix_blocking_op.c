@@ -59,6 +59,12 @@ os_end_blocking_op()
 int
 os_wakeup_blocking_op(korp_tid tid)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_korp_tid(tid))){
+      
+    }
+#endif
     int ret = pthread_kill(tid, g_blocking_op_signo);
     if (ret != 0) {
         return BHT_ERROR;

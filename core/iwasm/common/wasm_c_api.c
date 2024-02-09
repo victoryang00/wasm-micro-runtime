@@ -485,6 +485,12 @@ static bool
 search_thread_local_store_num(Vector *stores_by_tid, korp_tid tid,
                               thread_local_stores *out_ts, unsigned *out_i)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_new_korp_tid(tid))){
+        tid = temp;
+    }
+#endif
     unsigned i;
 
     for (i = 0; i < stores_by_tid->num_elems; i++) {
@@ -505,6 +511,12 @@ search_thread_local_store_num(Vector *stores_by_tid, korp_tid tid,
 static unsigned
 retrive_thread_local_store_num(Vector *stores_by_tid, korp_tid tid)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_new_korp_tid(tid))){
+        tid = temp;
+    }
+#endif
 #ifndef os_thread_local_attribute
     unsigned i = 0;
     thread_local_stores ts = { 0 };
@@ -535,6 +547,12 @@ retrive_thread_local_store_num(Vector *stores_by_tid, korp_tid tid)
 static bool
 increase_thread_local_store_num(Vector *stores_by_tid, korp_tid tid)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_new_korp_tid(tid))){
+        tid = temp;
+    }
+#endif
 #ifndef os_thread_local_attribute
     unsigned i = 0;
     thread_local_stores ts = { 0 };
@@ -581,6 +599,12 @@ increase_thread_local_store_num(Vector *stores_by_tid, korp_tid tid)
 static bool
 decrease_thread_local_store_num(Vector *stores_by_tid, korp_tid tid)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_new_korp_tid(tid))){
+        tid = temp;
+    }
+#endif
 #ifndef os_thread_local_attribute
     unsigned i = 0;
     thread_local_stores ts = { 0 };

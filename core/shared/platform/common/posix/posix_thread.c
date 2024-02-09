@@ -9,6 +9,10 @@
 #include "platform_api_vmcore.h"
 #include "platform_api_extension.h"
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../../../include/wamr_export.h"
+#endif
+
 typedef struct {
     thread_start_routine_t start;
     void *arg;
@@ -104,7 +108,14 @@ os_thread_create(korp_tid *tid, thread_start_routine_t start, void *arg,
 korp_tid
 os_self_thread()
 {
-    return (korp_tid)pthread_self();
+    korp_tid tid = (korp_tid)pthread_self();
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_korp_tid(tid))){
+    //    tid = temp;
+    }
+#endif
+    return tid;
 }
 
 int
@@ -387,12 +398,24 @@ os_rwlock_destroy(korp_rwlock *lock)
 int
 os_thread_join(korp_tid thread, void **value_ptr)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_new_korp_tid(thread))){
+        thread = temp;
+    }
+#endif
     return pthread_join(thread, value_ptr);
 }
 
 int
 os_thread_detach(korp_tid thread)
 {
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    korp_tid temp;
+    if((temp = wamr_get_new_korp_tid(thread))){
+        thread = temp;
+    }
+#endif
     return pthread_detach(thread);
 }
 

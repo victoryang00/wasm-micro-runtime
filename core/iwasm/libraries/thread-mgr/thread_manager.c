@@ -595,8 +595,12 @@ thread_manager_start_routine(void *arg)
 
     os_mutex_lock(&exec_env->wait_lock);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    ssize_t old_handle = exec_env->handle;
+    uint64_t old_handle = exec_env->handle;
+#endif
+    // exec_env->handle = os_self_thread();
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     wamr_handle_map(old_handle, os_self_thread());
+    //wamr_korp_tid_map(old_korp_tid, os_self_thread());
 #endif
     /* Notify the parent thread to continue running */
     os_cond_signal(&exec_env->wait_cond);
@@ -1316,12 +1320,12 @@ set_exception_visitor(void *node, void *user_data)
         exception_unlock(wasm_inst);
 
         /* Terminate the thread so it can exit from dead loops */
-        if (data->exception != NULL) {
-            set_thread_cancel_flags(exec_env);
-        }
-        else {
+        // if (data->exception != NULL) {
+        //     set_thread_cancel_flags(exec_env);
+        // }
+        // else {
             clear_thread_cancel_flags(exec_env);
-        }
+        // }
     }
 }
 
