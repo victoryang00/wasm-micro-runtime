@@ -112,7 +112,7 @@ os_self_thread()
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     korp_tid temp;
     if((temp = wamr_get_korp_tid(tid))){
-    //    tid = temp;
+       tid = temp;
     }
 #endif
     return tid;

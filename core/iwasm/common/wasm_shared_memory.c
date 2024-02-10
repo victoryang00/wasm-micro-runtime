@@ -247,6 +247,11 @@ map_try_release_wait_info(HashMap *wait_map_, AtomicWaitInfo *wait_info,
     destroy_wait_info(wait_info);
 }
 
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+extern korp_mutex syncop_mutex;
+extern korp_cond syncop_cv;
+#endif
+
 uint32
 wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
                          uint64 expect, int64 timeout, bool wait64)
@@ -295,6 +300,12 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     /* Lock the shared_mem_lock for the whole atomic wait process,
        and use it to os_cond_reltimedwait */
     os_mutex_lock(lock);
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (exec_env->is_restore) {
+        os_cond_signal(&syncop_cv);
+        os_mutex_unlock(&syncop_mutex);
+    }
+#endif
 
     no_wait = (!wait64 && *(uint32 *)address != (uint32)expect)
               || (wait64 && *(uint64 *)address != expect);
@@ -342,7 +353,7 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
                          ->memories[0]
                          ->memory_data,
                expect, timeout, wait64);
-        insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_WAIT);
+        insert_sync_op_atomic_wait(exec_env, address, expect, wait64);
     }
 #endif
     while (1) {
@@ -356,6 +367,10 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
                                  (uint64)timeout_1sec);
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
             // lightweight_uncheckpoint(exec_env);
+            if (exec_env->is_restore) {
+                printf("timed out so signaling again\n");
+                os_cond_signal(&syncop_cv);
+            }
 #endif
             if (wait_node->status == S_NOTIFIED /* notified by atomic.notify */
 #if WASM_ENABLE_THREAD_MGR != 0
@@ -398,6 +413,11 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
     map_try_release_wait_info(wait_map, wait_info, address);
 
     os_mutex_unlock(lock);
+#if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
+    if (exec_env->is_restore) {
+        os_mutex_lock(&syncop_mutex);
+    }
+#endif
 
     return is_timeout ? 2 : 0;
 }
@@ -447,17 +467,17 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
         return 0;
     }
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-        WASMExecEnv *exec_env = wasm_clusters_search_exec_env(
-            (WASMModuleInstanceCommon *)module_inst);
+    WASMExecEnv *exec_env =
+        wasm_clusters_search_exec_env((WASMModuleInstanceCommon *)module_inst);
+    bh_assert(exec_env);
     if (!exec_env->is_restore) {
-        bh_assert(exec_env);
         printf("notify %p %ld %d\n", address,
                ((uint8 *)address)
                    - ((WASMModuleInstance *)exec_env->module_inst)
                          ->memories[0]
                          ->memory_data,
                count);
-        insert_sync_op(exec_env, address, SYNC_OP_ATOMIC_NOTIFY);
+        insert_sync_op_atomic_notify(exec_env, address, count);
     }
 #endif
     /* Notify each wait node in the wait list */
