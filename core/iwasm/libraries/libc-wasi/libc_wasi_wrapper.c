@@ -731,7 +731,8 @@ wasi_fd_write(wasm_exec_env_t exec_env, wasi_fd_t fd,
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     insert_fd(fd, "", 0, iovs_len, MVVM_FWRITE);
-    LOG_FATAL("wasi_fd_write %d\n", gettid());
+    // LOG_FATAL("wasi_fd_write %d\n", gettid());
+    // printf("wasi_fd_write %d\n", gettid());
 #endif
 
 fail:

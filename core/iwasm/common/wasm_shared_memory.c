@@ -361,13 +361,14 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
             /* wait forever until it is notified or terminatied
                here we keep waiting and checking every second */
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-            // lightweight_checkpoint(exec_env);
+            lightweight_checkpoint(exec_env);
 #endif
             os_cond_reltimedwait(&wait_node->wait_cond, lock,
                                  (uint64)timeout_1sec);
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-            // lightweight_uncheckpoint(exec_env);
+            lightweight_uncheckpoint(exec_env);
             if (exec_env->is_restore) {
+                // os_mutex_unlock(&syncop_mutex);
                 printf("timed out so signaling again\n");
                 os_cond_signal(&syncop_cv);
             }
@@ -418,7 +419,6 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
         os_mutex_lock(&syncop_mutex);
     }
 #endif
-
     return is_timeout ? 2 : 0;
 }
 
@@ -441,10 +441,10 @@ wasm_runtime_atomic_notify(WASMModuleInstanceCommon *module, void *address,
          || (uint8 *)address + 4 > module_inst->memories[0]->memory_data_end);
     shared_memory_unlock(module_inst->memories[0]);
 
-    // if (out_of_bounds) {
-    //     wasm_runtime_set_exception(module, "out of bounds memory access");
-    //     return -1;
-    // }
+    if (out_of_bounds) {
+        wasm_runtime_set_exception(module, "out of bounds memory access");
+        return -1;
+    }
 
     /* Currently we have only one memory instance */
     if (!shared_memory_is_shared(module_inst->memories[0])) {
