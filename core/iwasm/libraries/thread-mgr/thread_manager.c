@@ -16,6 +16,10 @@
 #include "debug_engine.h"
 #endif
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../../../include/wamr_export.h"
+#endif
+
 typedef struct {
     bh_list_link l;
     void (*destroy_cb)(WASMCluster *);
