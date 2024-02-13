@@ -1320,12 +1320,12 @@ set_exception_visitor(void *node, void *user_data)
         exception_unlock(wasm_inst);
 
         /* Terminate the thread so it can exit from dead loops */
-        // if (data->exception != NULL) {
-        //     set_thread_cancel_flags(exec_env);
-        // }
-        // else {
+        if (data->exception != NULL) {
+            set_thread_cancel_flags(exec_env);
+        }
+        else {
             clear_thread_cancel_flags(exec_env);
-        // }
+        }
     }
 }
 
