@@ -526,9 +526,9 @@ wasi_fd_read(wasm_exec_env_t exec_env, wasi_fd_t fd,
     err = 0;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    LOG_DEBUG("wasi_fd_read exec_env=%d, fd=%d, iovec_app=%d, iovs_len=%d, "
+    LOG_FATAL("wasi_fd_read exec_env=%d, fd=%d, iovec_app=%d, iovs_len=%d, "
               "nread_app=%d \n",
-              exec_env, fd, iovec_app, iovs_len, nread_app);
+              exec_env, fd, iovec_app, iovs_len, nread);
     insert_fd(fd, "", 0, iovs_len, MVVM_FREAD);
 #endif
 
@@ -569,7 +569,7 @@ wasi_fd_seek(wasm_exec_env_t exec_env, wasi_fd_t fd, wasi_filedelta_t offset,
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     LOG_FATAL("wasi_fd_seek exec_env=%d, fd=%d, offset=%d, whence=%d, "
               "newoffset=%d %d\n",
-              exec_env, fd, offset, whence, newoffset,gettid());
+              exec_env, fd, offset, whence, *newoffset, exec_env->handle);
     insert_fd(fd, "", whence, offset, MVVM_FSEEK);
 #endif
 
@@ -591,8 +591,8 @@ wasi_fd_tell(wasm_exec_env_t exec_env, wasi_fd_t fd, wasi_filesize_t *newoffset)
         return (wasi_errno_t)-1;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    LOG_DEBUG("wasi_fd_tell exec_env=%d, fd=%d, newoffset=%d \n", exec_env, fd,
-              newoffset);
+    LOG_FATAL("wasi_fd_tell exec_env=%d, fd=%d, newoffset=%d \n", exec_env, fd,
+              *newoffset);
 #endif
 
     return wasmtime_ssp_fd_tell(exec_env, curfds, fd, newoffset);
@@ -730,8 +730,8 @@ wasi_fd_write(wasm_exec_env_t exec_env, wasi_fd_t fd,
     err = 0;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_fd(fd, "", 0, iovs_len, MVVM_FWRITE);
-    // LOG_FATAL("wasi_fd_write %d\n", gettid());
+    insert_fd(fd, "", 0, nwritten, MVVM_FWRITE);
+    LOG_FATAL("wasi_fd_write %d %d\n", fd, nwritten);
     // printf("wasi_fd_write %d\n", gettid());
 #endif
 
@@ -2650,7 +2650,7 @@ wasi_sock_send(wasm_exec_env_t exec_env, wasi_fd_t sock,
     wasi_errno_t err;
     size_t send_bytes = 0;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if(exec_env->is_restore){
+    if (exec_env->is_restore) {
         sock = get_sock_fd(sock);
     }
 #endif

@@ -597,7 +597,7 @@ thread_manager_start_routine(void *arg)
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     uint64_t old_handle = exec_env->handle;
 #endif
-    // exec_env->handle = os_self_thread();
+    exec_env->handle = os_self_thread();
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     wamr_handle_map(old_handle, os_self_thread());
     //wamr_korp_tid_map(old_korp_tid, os_self_thread());
