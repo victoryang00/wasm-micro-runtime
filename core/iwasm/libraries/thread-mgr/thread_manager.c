@@ -16,6 +16,10 @@
 #include "debug_engine.h"
 #endif
 
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../../../include/wamr_export.h"
+#endif
+
 typedef struct {
     bh_list_link l;
     void (*destroy_cb)(WASMCluster *);
@@ -599,7 +603,7 @@ thread_manager_start_routine(void *arg)
 #endif
     exec_env->handle = os_self_thread();
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    wamr_handle_map(old_handle, os_self_thread());
+    wamr_handle_map(old_handle, exec_env->handle);
     //wamr_korp_tid_map(old_korp_tid, os_self_thread());
 #endif
     /* Notify the parent thread to continue running */
