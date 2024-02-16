@@ -526,10 +526,10 @@ wasi_fd_read(wasm_exec_env_t exec_env, wasi_fd_t fd,
     err = 0;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    LOG_FATAL("wasi_fd_read exec_env=%d, fd=%d, iovec_app=%d, iovs_len=%d, "
-              "nread_app=%d \n",
-              exec_env, fd, iovec_app, iovs_len, nread);
-    insert_fd(fd, "", 0, iovs_len, MVVM_FREAD);
+    LOG_DEBUG("wasi_fd_read exec_env=%d, fd=%d, iovec_app=%d, iovs_len=%d, "
+              "nread_app=%d %d\n",
+              exec_env, fd, iovec_app, iovs_len, nread, total_size);
+    insert_fd(fd, "", 0, nread, MVVM_FREAD);
 #endif
 
 fail:
@@ -565,16 +565,16 @@ wasi_fd_seek(wasm_exec_env_t exec_env, wasi_fd_t fd, wasi_filedelta_t offset,
 
     if (!validate_native_addr(newoffset, sizeof(wasi_filesize_t)))
         return (wasi_errno_t)-1;
-
+    wasi_errno_t res =
+        wasmtime_ssp_fd_seek(exec_env, curfds, fd, offset, whence, newoffset);
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    LOG_FATAL("wasi_fd_seek exec_env=%d, fd=%d, offset=%d, whence=%d, "
+    LOG_DEBUG("wasi_fd_seek exec_env=%d, fd=%d, offset=%d, whence=%d, "
               "newoffset=%d %d\n",
               exec_env, fd, offset, whence, *newoffset, exec_env->handle);
-    insert_fd(fd, "", whence, offset, MVVM_FSEEK);
+    insert_fd(fd, "", whence, *newoffset, MVVM_FSEEK);
 #endif
 
-    return wasmtime_ssp_fd_seek(exec_env, curfds, fd, offset, whence,
-                                newoffset);
+    return res;
 }
 
 static wasi_errno_t
@@ -591,7 +591,7 @@ wasi_fd_tell(wasm_exec_env_t exec_env, wasi_fd_t fd, wasi_filesize_t *newoffset)
         return (wasi_errno_t)-1;
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    LOG_FATAL("wasi_fd_tell exec_env=%d, fd=%d, newoffset=%d \n", exec_env, fd,
+    LOG_DEBUG("wasi_fd_tell exec_env=%d, fd=%d, newoffset=%d \n", exec_env, fd,
               *newoffset);
 #endif
 
@@ -731,7 +731,7 @@ wasi_fd_write(wasm_exec_env_t exec_env, wasi_fd_t fd,
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     insert_fd(fd, "", 0, nwritten, MVVM_FWRITE);
-    LOG_FATAL("wasi_fd_write %d %d\n", fd, nwritten);
+    LOG_DEBUG("wasi_fd_write %d %d\n", fd, nwritten);
     // printf("wasi_fd_write %d\n", gettid());
 #endif
 

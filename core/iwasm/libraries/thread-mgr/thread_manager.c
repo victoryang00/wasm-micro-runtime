@@ -658,7 +658,7 @@ thread_manager_start_routine(void *arg)
 }
 
 // Explicitly define so it moves a pointer instead of int
-void* restore_env();
+WASMExecEnv *restore_env(WASMModuleInstanceCommon* module_inst);
 
 int32
 wasm_cluster_create_thread(WASMExecEnv *exec_env,
@@ -686,7 +686,7 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (exec_env->is_restore) {
         // Don't generate a new env on restore
-        new_exec_env = restore_env();
+        new_exec_env = restore_env(module_inst);
         printf("restored child env\n");
         save_restore_call_chain = new_exec_env->restore_call_chain;
         is_restore = true;
