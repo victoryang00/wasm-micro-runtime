@@ -993,7 +993,11 @@ __wasi_sock_get_ipv6_only(__wasi_fd_t fd, bool *option)
  * since don't want to re-compile the wasi-libc,
  * we tend to keep original implentations of recv() and send().
  */
-
+int s_(int domain, int socktype, int protocol, uint32_t sockfd);
+int o_(char *path, int fd, int offset);
+void ci_(int socket_fd);
+void si_(int socket_fd);
+uint32_t inet_addr(const char *ip);
 #ifdef __cplusplus
 }
 #endif

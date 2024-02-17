@@ -415,16 +415,15 @@ wasm_runtime_atomic_wait(WASMModuleInstanceCommon *module, void *address,
 
     os_mutex_unlock(lock);
 #if WASM_ENABLE_THREAD_MGR != 0 && WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (exec_env->is_restore) {
-        os_mutex_lock(&syncop_mutex);
+    if (!exec_env->is_restore) {
+        printf("wake %p %ld %ld %ld %d\n", address,
+               ((uint8 *)address)
+                   - ((WASMModuleInstance *)exec_env->module_inst)
+                         ->memories[0]
+                         ->memory_data,
+               expect, timeout, wait64);
+        insert_sync_op_atomic_wake(exec_env, address);
     }
-    printf("wake %p %ld %ld %ld %d\n", address,
-            ((uint8 *)address)
-                - ((WASMModuleInstance *)exec_env->module_inst)
-                        ->memories[0]
-                        ->memory_data,
-            expect, timeout, wait64);
-    insert_sync_op_atomic_wake(exec_env, address);
 #endif
     return is_timeout ? 2 : 0;
 }
