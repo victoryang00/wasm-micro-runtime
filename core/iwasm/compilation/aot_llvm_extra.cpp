@@ -279,7 +279,7 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
         reinterpret_cast<TargetMachine *>(comp_ctx->target_machine);
     PipelineTuningOptions PTO;
     PTO.LoopVectorization = true;
-    PTO.SLPVectorization = true;
+    PTO.SLPVectorization = false;
     PTO.LoopUnrolling = true;
 
 #if LLVM_VERSION_MAJOR >= 16
@@ -401,7 +401,7 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
 
         /* Apply Vectorize related passes for AOT mode */
         FPM.addPass(LoopVectorizePass());
-        FPM.addPass(SLPVectorizerPass());
+        // FPM.addPass(SLPVectorizerPass());
         FPM.addPass(LoadStoreVectorizerPass());
 
         if (comp_ctx->enable_llvm_pgo || comp_ctx->use_prof_file) {
