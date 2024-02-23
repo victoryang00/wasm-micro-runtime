@@ -456,6 +456,10 @@ main(int argc, char *argv[])
         else if (!strcmp(argv[0], "--enable-checkpoint")) {
             option.enable_aux_stack_frame = true;
             option.enable_checkpoint = true;
+        } else if (!strcmp(argv[0], "--enable-loop-checkpoint")) {
+            option.enable_aux_stack_frame = true;
+            option.enable_checkpoint = true;
+            option.enable_loop_checkpoint = true;
         }
         else if (!strcmp(argv[0], "--enable-br-checkpoint")) {
             option.enable_aux_stack_frame = true;

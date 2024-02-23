@@ -396,8 +396,10 @@ typedef struct AOTCompContext {
     bool enable_aux_stack_frame;
 
     bool enable_checkpoint;
+    bool enable_loop_checkpoint;
     bool enable_br_checkpoint;
     bool enable_every_checkpoint;
+    bool inst_checkpointed;
     bool enable_aux_stack_dirty_bit;
 
     /* Thread Manager */
@@ -515,6 +517,7 @@ typedef struct AOTCompOption {
     bool enable_aux_stack_check;
     bool enable_aux_stack_frame;
     bool enable_checkpoint;
+    bool enable_loop_checkpoint;
     bool enable_br_checkpoint;
     bool enable_every_checkpoint;
     bool enable_aux_stack_dirty_bit;

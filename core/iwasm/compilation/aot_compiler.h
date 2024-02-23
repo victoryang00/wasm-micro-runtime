@@ -152,7 +152,7 @@ offset_of_ref(AOTCompContext *comp_ctx, unsigned n)
  * @param frame the frame information
  */
 bool
-aot_gen_commit_values(AOTCompFrame *frame);
+aot_gen_commit_values(AOTCompFrame *frame, bool reset_dirty_bit);
 
 /**
  * Generate instructions to restore computation result to the frame.
