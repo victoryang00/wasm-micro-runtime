@@ -474,6 +474,30 @@ main(int argc, char *argv[])
         else if (!strcmp(argv[0], "--enable-aux-stack-dirty-bit")) {
             option.enable_aux_stack_dirty_bit = true;
         }
+        else if (!strcmp(argv[0], "--enable-counter-loop-checkpoint")) {
+            option.enable_aux_stack_frame = true;
+            option.enable_checkpoint = true;
+            option.enable_loop_checkpoint = true;
+            option.enable_counter_loop_checkpoint = true;
+        }
+        else if (!strcmp(argv[0], "--enable-checkpoint-pgo")) {
+            option.enable_checkpoint_pgo = true;
+        }
+        else if (!strcmp(argv[0], "--exp-disable-commit-sp-ip")) {
+            option.exp_disable_commit_sp_ip = true;
+        }
+        else if (!strcmp(argv[0], "--exp-disable-local-commit")) {
+            option.exp_disable_local_commit = true;
+        }
+        else if (!strcmp(argv[0], "--exp-disable-stack-commit-before-block")) {
+            option.exp_disable_stack_commit_before_block = true;
+        }
+        else if (!strcmp(argv[0], "--exp-disable-gen-fence-int3")) {
+            option.exp_disable_gen_fence_int3 = true;
+        }
+        else if (!strcmp(argv[0], "--exp-disable-restore-jump")) {
+            option.exp_disable_restore_jump = true;
+        }
         else if (!strcmp(argv[0], "--enable-perf-profiling")) {
             option.enable_aux_stack_frame = true;
         }
@@ -653,6 +677,8 @@ main(int argc, char *argv[])
 #endif
 
     bh_print_time("Begin to create compile context");
+
+    option.aot_file_name = out_file_name;
 
     if (!(comp_ctx = aot_create_comp_context(comp_data, &option))) {
         printf("%s\n", aot_get_last_error());

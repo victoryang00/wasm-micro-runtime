@@ -3664,8 +3664,6 @@ aot_emit_aot_file(AOTCompContext *comp_ctx, AOTCompData *comp_data,
     bool ret = false;
     FILE *file;
 
-    comp_ctx->aot_file_name = file_name;
-
     bh_print_time("Begin to emit AOT file");
 
     if (!(aot_file_buf =

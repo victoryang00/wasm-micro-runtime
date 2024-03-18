@@ -401,6 +401,14 @@ typedef struct AOTCompContext {
     bool enable_every_checkpoint;
     bool inst_checkpointed;
     bool enable_aux_stack_dirty_bit;
+    bool enable_counter_loop_checkpoint;
+    bool enable_checkpoint_pgo;
+    const char *aot_file_name;
+    bool exp_disable_stack_commit_before_block;
+    bool exp_disable_gen_fence_int3;
+    bool exp_disable_commit_sp_ip;
+    bool exp_disable_local_commit;
+    bool exp_disable_restore_jump;
 
     /* Thread Manager */
     bool enable_thread_mgr;
@@ -490,8 +498,7 @@ typedef struct AOTCompContext {
     AOTCompFrame *aot_frame;
     LLVMBuilderRef aot_frame_alloca_builder;
 
-    /* AOT output file name, to generate {aot_file_name}.o file for analysis */
-    const char *aot_file_name;
+    int checkpoint_type; /* 0 - func, 1 - loop, 2 - br, 3 - every*/
 } AOTCompContext;
 
 enum {
@@ -521,6 +528,14 @@ typedef struct AOTCompOption {
     bool enable_br_checkpoint;
     bool enable_every_checkpoint;
     bool enable_aux_stack_dirty_bit;
+    bool enable_counter_loop_checkpoint;
+    bool enable_checkpoint_pgo;
+    const char *aot_file_name;
+    bool exp_disable_stack_commit_before_block;
+    bool exp_disable_gen_fence_int3;
+    bool exp_disable_commit_sp_ip;
+    bool exp_disable_local_commit;
+    bool exp_disable_restore_jump;
     bool disable_llvm_intrinsics;
     bool disable_llvm_lto;
     bool enable_llvm_pgo;

@@ -2409,6 +2409,29 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
     if (option->enable_every_checkpoint)
         comp_ctx->enable_every_checkpoint = true;
 
+    if (option->enable_counter_loop_checkpoint)
+        comp_ctx->enable_counter_loop_checkpoint = true;
+
+    if (option->enable_checkpoint_pgo)
+        comp_ctx->enable_checkpoint_pgo = true;
+
+    comp_ctx->aot_file_name = option->aot_file_name;
+
+    if (option->exp_disable_commit_sp_ip)
+        comp_ctx->exp_disable_commit_sp_ip = true;
+
+    if (option->exp_disable_local_commit)
+        comp_ctx->exp_disable_local_commit = true;
+
+    if (option->exp_disable_stack_commit_before_block)
+        comp_ctx->exp_disable_stack_commit_before_block = true;
+
+    if (option->exp_disable_gen_fence_int3)
+        comp_ctx->exp_disable_gen_fence_int3 = true;
+
+    if (option->exp_disable_restore_jump)
+        comp_ctx->exp_disable_restore_jump = true;
+
     if (option->enable_aux_stack_dirty_bit)
         comp_ctx->enable_aux_stack_dirty_bit = true;
 

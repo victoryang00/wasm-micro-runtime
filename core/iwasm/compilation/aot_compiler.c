@@ -342,6 +342,85 @@ aot_gen_commit_value(AOTCompFrame *frame, bool reset_dirty_bit, AOTValueSlot **p
 }
 
 bool
+fake_aot_gen_commit_value(AOTCompFrame *frame, bool reset_dirty_bit, AOTValueSlot **p, uint32 local_idx) {
+    if (!(*p)->dirty) {
+        switch ((*p)->type) {
+            case VALUE_TYPE_I32:
+            case VALUE_TYPE_FUNCREF:
+            case VALUE_TYPE_EXTERNREF:
+            case VALUE_TYPE_F32:
+            case VALUE_TYPE_I1:
+                break;
+            case VALUE_TYPE_I64:
+            case VALUE_TYPE_F64:
+                (*p)++;
+                break;
+            case VALUE_TYPE_V128:
+                (*p) += 3;
+                break;
+            default:
+                bh_assert(0);
+                break;
+        }
+        return true;
+    }
+
+    if (reset_dirty_bit)
+        (*p)->dirty = 0;
+
+    switch ((*p)->type) {
+        case VALUE_TYPE_I32:
+        case VALUE_TYPE_FUNCREF:
+        case VALUE_TYPE_EXTERNREF:
+            break;
+        case VALUE_TYPE_I64:
+            if (reset_dirty_bit)
+                ((*p)+1)->dirty = 0;
+            (*p) += 1;
+            break;
+        case VALUE_TYPE_F32:
+            break;
+        case VALUE_TYPE_F64:
+            if (reset_dirty_bit)
+                ((*p)+1)->dirty = 0;
+            (*p) += 1;
+            break;
+        case VALUE_TYPE_V128:
+            if (reset_dirty_bit) {
+                ((*p)+1)->dirty = 0;
+                ((*p)+2)->dirty = 0;
+                ((*p)+3)->dirty = 0;
+            }
+            (*p) += 3;
+            break;
+        case VALUE_TYPE_I1:
+            break;
+        default:
+            bh_assert(0);
+            break;
+    }
+    return true;
+}
+
+bool
+fake_aot_gen_commit_values(AOTCompFrame *frame, bool reset_dirty_bit)
+{
+    AOTCompContext *comp_ctx = frame->comp_ctx;
+    AOTValueSlot *p;
+    uint32 local_idx;
+
+    reset_dirty_bit |= comp_ctx->enable_aux_stack_dirty_bit;
+
+    for (p = frame->lp, local_idx = 0; p < frame->sp; p++, local_idx++) {
+        if (!fake_aot_gen_commit_value(frame, reset_dirty_bit, &p, local_idx))
+            return false;
+    }
+
+    return true;
+}
+
+
+bool
 aot_gen_commit_values(AOTCompFrame *frame, bool reset_dirty_bit)
 {
     AOTCompContext *comp_ctx = frame->comp_ctx;
@@ -353,6 +432,93 @@ aot_gen_commit_values(AOTCompFrame *frame, bool reset_dirty_bit)
     for (p = frame->lp, local_idx = 0; p < frame->sp; p++, local_idx++) {
         if (!aot_gen_commit_value(frame, reset_dirty_bit, &p, local_idx))
             return false;
+    }
+
+    return true;
+}
+
+
+bool
+aot_gen_commit_all_locals(AOTCompFrame *frame)
+{
+    AOTCompContext *comp_ctx = frame->comp_ctx;
+    AOTFuncContext *func_ctx = frame->func_ctx;
+    AOTValueSlot *p;
+    uint32 local_idx;
+    LLVMValueRef value;
+    LLVMTypeRef llvm_value_type;
+    uint32 n;
+    uint32 total_locals = func_ctx->aot_func->func_type->param_count + func_ctx->aot_func->local_count;
+
+    for (
+        p = frame->lp, local_idx = 0;
+        local_idx < total_locals;
+        p++, local_idx++) {
+
+        n = (p) - frame->lp;
+        llvm_value_type = TO_LLVM_TYPE(p->type);
+        if (llvm_value_type == NULL) {
+            fprintf(stderr, "gen value %d type error\n", (p)->type);
+            fprintf(stderr, "local_idx %d n %d\n", local_idx, n);
+            return false;
+        }
+        value = LLVMBuildLoad2(comp_ctx->builder, llvm_value_type,
+                        func_ctx->locals[local_idx],
+                        "commit_stack_load");
+        if (value == NULL) {
+            fprintf(stderr, "gen value load error\n");
+            return false;
+        }
+        switch ((p)->type) {
+            case VALUE_TYPE_I32:
+            case VALUE_TYPE_FUNCREF:
+            case VALUE_TYPE_EXTERNREF:
+                if (!store_value(comp_ctx, value, VALUE_TYPE_I32,
+                                    func_ctx->cur_frame,
+                                    offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_I64:
+                if (!store_value(comp_ctx, value, VALUE_TYPE_I64,
+                                    func_ctx->cur_frame,
+                                    offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_F32:
+                if (!store_value(comp_ctx, value, VALUE_TYPE_F32,
+                                    func_ctx->cur_frame,
+                                    offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_F64:
+                (p) += 1;
+                if (!store_value(comp_ctx, value, VALUE_TYPE_F64,
+                                    func_ctx->cur_frame,
+                                    offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_V128:
+                (p) += 3;
+                if (!store_value(comp_ctx, value, VALUE_TYPE_V128,
+                                    func_ctx->cur_frame,
+                                    offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            case VALUE_TYPE_I1:
+                if (!(value = LLVMBuildZExt(comp_ctx->builder, value, I32_TYPE,
+                                            "i32_val"))) {
+                    aot_set_last_error("llvm build bit cast failed");
+                    return false;
+                }
+                if (!store_value(comp_ctx, value, VALUE_TYPE_I32,
+                                    func_ctx->cur_frame,
+                                    offset_of_local(comp_ctx, n)))
+                    return false;
+                break;
+            default:
+                bh_assert(0);
+                break;
+        }
     }
 
     return true;
@@ -770,59 +936,103 @@ aot_gen_checkpoint(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                    const uint8 *frame_ip)
 {
     comp_ctx->inst_checkpointed = true;
-    if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
-                              frame_ip))
-        return false;
-    if (!aot_gen_commit_values(comp_ctx->aot_frame, false))
-        return false;
 
-    char name[32];
-    LLVMBasicBlockRef block_restore_jump, block_restore_value;
+    bool disable_commit = comp_ctx->checkpoint_type != 0 && comp_ctx->exp_disable_commit_sp_ip;
+    bool disable_restore_jump = comp_ctx->checkpoint_type != 0 && comp_ctx->exp_disable_restore_jump;
+    bool disable_gen_fence_int3 = comp_ctx->checkpoint_type != 0 && comp_ctx->exp_disable_gen_fence_int3;
 
-    snprintf(name, sizeof(name), "restore-%zu",
-             (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    if (!(block_restore_value = LLVMAppendBasicBlockInContext(
-              comp_ctx->context, func_ctx->func, name))) {
-        aot_set_last_error("add LLVM basic block failed.");
-        return false;
+    if (disable_commit) {
+    } else {
+        if (!aot_gen_commit_sp_ip(comp_ctx->aot_frame, comp_ctx->aot_frame->sp,
+                                frame_ip))
+            return false;
+        if (!aot_gen_commit_values(comp_ctx->aot_frame, false))
+            return false;
+    }
+    if (disable_gen_fence_int3) {
+    } else {
+        if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))
+            return false;
     }
 
-    snprintf(name, sizeof(name), "restore-jump-%zu",
-             (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    if (!(block_restore_jump = LLVMAppendBasicBlockInContext(
-              comp_ctx->context, func_ctx->func, name))) {
-        aot_set_last_error("add LLVM basic block failed.");
-        return false;
+    if (disable_restore_jump) {
+    } else {
+        char name[32];
+        LLVMBasicBlockRef block_restore_jump, block_restore_value;
+
+        snprintf(name, sizeof(name), "restore-%zu",
+                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        if (!(block_restore_value = LLVMAppendBasicBlockInContext(
+                comp_ctx->context, func_ctx->func, name))) {
+            aot_set_last_error("add LLVM basic block failed.");
+            return false;
+        }
+
+        snprintf(name, sizeof(name), "restore-jump-%zu",
+                (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        if (!(block_restore_jump = LLVMAppendBasicBlockInContext(
+                comp_ctx->context, func_ctx->func, name))) {
+            aot_set_last_error("add LLVM basic block failed.");
+            return false;
+        }
+
+        LLVMMoveBasicBlockAfter(block_restore_value,
+                                LLVMGetInsertBlock(comp_ctx->aot_frame_alloca_builder));
+        LLVMMoveBasicBlockAfter(block_restore_jump, LLVMGetInsertBlock(comp_ctx->builder));
+
+        if (!LLVMBuildBr(comp_ctx->builder, block_restore_jump)) {
+            aot_set_last_error("llvm build br failed.");
+            return false;
+        }
+
+        LLVMValueRef ip_offset;
+        if (comp_ctx->pointer_size == sizeof(uint64))
+            ip_offset =
+                I64_CONST((uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        else
+            ip_offset =
+                I32_CONST((uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
+        LLVMAddCase(func_ctx->restore_switch, ip_offset, block_restore_value);
+
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_value);
+        if (!aot_gen_restore_values(comp_ctx->aot_frame))
+            return false;
+        LLVMBuildBr(comp_ctx->builder, block_restore_jump);
+
+        LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_jump);
     }
-
-    LLVMMoveBasicBlockAfter(block_restore_value,
-                            LLVMGetInsertBlock(comp_ctx->builder));
-    LLVMMoveBasicBlockAfter(block_restore_jump, block_restore_value);
-
-    if (!LLVMBuildBr(comp_ctx->builder, block_restore_jump)) {
-        aot_set_last_error("llvm build br failed.");
-        return false;
-    }
-
-    LLVMValueRef ip_offset;
-    if (comp_ctx->pointer_size == sizeof(uint64))
-        ip_offset =
-            I64_CONST((uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    else
-        ip_offset =
-            I32_CONST((uint32)(uintptr_t)(frame_ip - func_ctx->aot_func->code));
-    LLVMAddCase(func_ctx->restore_switch, ip_offset, block_restore_value);
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_value);
-    if (!aot_gen_restore_values(comp_ctx->aot_frame))
-        return false;
-    LLVMBuildBr(comp_ctx->builder, block_restore_jump);
-
-    LLVMPositionBuilderAtEnd(comp_ctx->builder, block_restore_jump);
-    if (!aot_compile_emit_fence_nop(comp_ctx, func_ctx))
-        return false;
 
     return true;
+}
+
+static bool pgo_skip_loop(const char *aot_file_name, uint32 func_idx, uint64 ip) {
+    static uint32* func_list = NULL;
+    static uint64* ip_list = NULL;
+    static int n = -1;
+    if (n == -1) {
+        n = 0;
+        // f"{aot_file_name}.pgo"
+        char *pgo_file_name = (char*)malloc(strlen(aot_file_name) + 5);
+        strcpy(pgo_file_name, aot_file_name);
+        strcat(pgo_file_name, ".pgo");
+        FILE* f = fopen(pgo_file_name, "r");
+        if (!f) {
+            return false;
+        }
+        fscanf(f, "%d", &n);
+        func_list = (uint32*)malloc(n * sizeof(uint32));
+        ip_list = (uint64*)malloc(n * sizeof(uint64));
+        for (int i = 0; i < n; i++) {
+            fscanf(f, "%d %lu", &func_list[i], &ip_list[i]);
+        }
+        free(pgo_file_name);
+    }
+    for (int i = 0; i < n; i++) {
+        if (func_list[i] == func_idx && ip_list[i] == ip) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool
@@ -847,6 +1057,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
     float64 f64_const;
     AOTFuncType *func_type = NULL;
     bool last_op_is_loop = false;
+    LLVMValueRef last_loop_counter = NULL;
 #if WASM_ENABLE_DEBUG_AOT != 0
     LLVMMetadataRef location;
 #endif
@@ -919,9 +1130,77 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         comp_ctx->inst_checkpointed = false;
         opcode = *frame_ip++;
 
-        if (comp_ctx->enable_every_checkpoint || (comp_ctx->enable_loop_checkpoint && last_op_is_loop)) {
+        if (comp_ctx->enable_every_checkpoint) {
             bh_assert(comp_ctx->aot_frame);
+            comp_ctx->checkpoint_type = 3;
             aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+        }
+        if (comp_ctx->enable_loop_checkpoint && last_op_is_loop) {
+            bh_assert(comp_ctx->aot_frame);
+
+            uint64 ip_offset = (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code);
+            bool skip_loop = pgo_skip_loop(comp_ctx->aot_file_name, func_index, ip_offset);
+            if (skip_loop && comp_ctx->enable_checkpoint_pgo) {
+                fprintf(stderr, "skip loop %zu\n", ip_offset);
+            } else {
+                if (comp_ctx->enable_counter_loop_checkpoint) {
+                    // counter = counter + 1
+                    LLVMValueRef counter = LLVMBuildLoad2(
+                        comp_ctx->builder, I32_TYPE, last_loop_counter, "counter");
+                    LLVMValueRef counter_inc = LLVMBuildAdd(
+                        comp_ctx->builder, counter, I32_ONE, "counter_inc");
+                    LLVMBuildStore(comp_ctx->builder, counter_inc, last_loop_counter);
+
+                    const int threshold = 1 << 20;
+
+                    LLVMBasicBlockRef normal_block, ckpt_block;
+                    char name[32];
+                    snprintf(name, sizeof(name), "loop-ckpt-%zu",
+                            (uint64)(uintptr_t)(frame_ip - 1 - func_ctx->aot_func->code));
+                    if (!(ckpt_block = LLVMAppendBasicBlockInContext(
+                            comp_ctx->context, func_ctx->func, name))) {
+                        aot_set_last_error("add LLVM basic block failed.");
+                        goto fail;
+                    }
+                    LLVMMoveBasicBlockAfter(ckpt_block,
+                                            LLVMGetInsertBlock(comp_ctx->builder));
+                    
+                    snprintf(name, sizeof(name), "loop-normal-%zu",
+                                (uint64)(uintptr_t)(frame_ip - 1 - func_ctx->aot_func->code));
+                    if (!(normal_block = LLVMAppendBasicBlockInContext(
+                            comp_ctx->context, func_ctx->func, name))) {
+                        aot_set_last_error("add LLVM basic block failed.");
+                        goto fail;
+                    }
+
+                    // counter > threshold, then goto checkpoint, else goto normal
+                    LLVMValueRef cond = LLVMBuildICmp(comp_ctx->builder, LLVMIntULT,
+                                                    counter_inc, I32_CONST(threshold),
+                                                    "cond");
+                    LLVMBuildCondBr(comp_ctx->builder, cond, normal_block, ckpt_block);
+                    LLVMPositionBuilderAtEnd(comp_ctx->builder, ckpt_block);
+
+                    // TODO(huab): find a better way to commit locals
+                    aot_gen_commit_all_locals(comp_ctx->aot_frame);
+
+                    // checkpoint
+                    comp_ctx->checkpoint_type = 1;
+                    aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+
+                    // reset the counter
+                    LLVMBuildStore(comp_ctx->builder, I32_ZERO, last_loop_counter);
+
+                    LLVMBuildBr(comp_ctx->builder, normal_block);
+
+                    // normal
+                    LLVMMoveBasicBlockAfter(normal_block, LLVMGetInsertBlock(comp_ctx->builder));
+                    LLVMPositionBuilderAtEnd(comp_ctx->builder, normal_block);
+                } else {
+                    comp_ctx->checkpoint_type = 1;
+                    aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
+                }
+            }
+
             last_op_is_loop = false;
         }
 
@@ -948,7 +1227,16 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     last_op_is_loop = true;
                 }
                 if (comp_ctx->enable_loop_checkpoint) {
-                    aot_gen_commit_values(comp_ctx->aot_frame, true);
+                    if (comp_ctx->exp_disable_stack_commit_before_block) {
+                        fake_aot_gen_commit_values(comp_ctx->aot_frame, true);
+                    } else {
+                        aot_gen_commit_values(comp_ctx->aot_frame, true);
+                    }
+                    if (comp_ctx->enable_counter_loop_checkpoint) {
+                        last_loop_counter = LLVMBuildAlloca(comp_ctx->aot_frame_alloca_builder,
+                            I32_TYPE, "wasm_loop_ckpt_counter");
+                        LLVMBuildStore(comp_ctx->builder, I32_ZERO, last_loop_counter);
+                    }
                 }
                 value_type = *frame_ip++;
                 if (value_type == VALUE_TYPE_I32 || value_type == VALUE_TYPE_I64
@@ -1004,6 +1292,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_BR:
                 if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
+                        comp_ctx->checkpoint_type = 2;
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
                         if (comp_ctx->enable_aux_stack_dirty_bit) {
@@ -1020,6 +1309,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_BR_IF:
                 if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
+                        comp_ctx->checkpoint_type = 2;
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
                         if (comp_ctx->enable_aux_stack_dirty_bit) {
@@ -1037,6 +1327,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_BR_TABLE:
                 if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
+                        comp_ctx->checkpoint_type = 2;
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
                         if (comp_ctx->enable_aux_stack_dirty_bit) {
@@ -1073,6 +1364,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             {
                 if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     if (comp_ctx->enable_br_checkpoint) {
+                        comp_ctx->checkpoint_type = 2;
                         aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
                     } else {
                         if (comp_ctx->enable_aux_stack_dirty_bit) {
@@ -1117,6 +1409,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 uint8 *frame_ip_org = frame_ip;
                 if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     bh_assert(comp_ctx->aot_frame);
+                    comp_ctx->checkpoint_type = 0;
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
                 }
 
@@ -1134,6 +1427,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
                 if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
                     bh_assert(comp_ctx->aot_frame);
+                    comp_ctx->checkpoint_type = 0;
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
                 }
 
@@ -1321,9 +1615,16 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 if (!aot_compile_op_set_local(comp_ctx, func_ctx, local_idx))
                     return false;
                 if (comp_ctx->enable_loop_checkpoint && !comp_ctx->enable_aux_stack_dirty_bit) {
-                    AOTValueSlot* p = comp_ctx->aot_frame->lp + comp_ctx->aot_frame->cur_wasm_func->local_offsets[local_idx];
-                    if (!aot_gen_commit_value(comp_ctx->aot_frame, true, &p, local_idx))
-                        return false;
+                    if (comp_ctx->enable_counter_loop_checkpoint) {
+                    } else {
+                        AOTValueSlot* p = comp_ctx->aot_frame->lp + comp_ctx->aot_frame->cur_wasm_func->local_offsets[local_idx];
+                        if (comp_ctx->exp_disable_local_commit) {
+                            fake_aot_gen_commit_value(comp_ctx->aot_frame, true, &p, local_idx);
+                        } else {
+                            if (!aot_gen_commit_value(comp_ctx->aot_frame, true, &p, local_idx))
+                                return false;
+                        }
+                    }
                 }
                 break;
 
@@ -1332,9 +1633,16 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                 if (!aot_compile_op_tee_local(comp_ctx, func_ctx, local_idx))
                     return false;
                 if (comp_ctx->enable_loop_checkpoint && !comp_ctx->enable_aux_stack_dirty_bit) {
-                    AOTValueSlot* p = comp_ctx->aot_frame->lp + comp_ctx->aot_frame->cur_wasm_func->local_offsets[local_idx];
-                    if (!aot_gen_commit_value(comp_ctx->aot_frame, true, &p, local_idx))
-                        return false;
+                    if (comp_ctx->enable_counter_loop_checkpoint) {
+                    } else {
+                        AOTValueSlot* p = comp_ctx->aot_frame->lp + comp_ctx->aot_frame->cur_wasm_func->local_offsets[local_idx];
+                        if (comp_ctx->exp_disable_local_commit) {
+                            fake_aot_gen_commit_value(comp_ctx->aot_frame, true, &p, local_idx);
+                        } else {
+                            if (!aot_gen_commit_value(comp_ctx->aot_frame, true, &p, local_idx))
+                                return false;
+                        }
+                    }
                 }
                 break;
 
