@@ -662,6 +662,11 @@ aot_handle_llvm_errmsg(const char *string, LLVMErrorRef err);
 char *
 aot_compress_aot_func_names(AOTCompContext *comp_ctx, uint32 *p_size);
 
+
+void
+aot_block_add_unroll_pass(AOTCompContext *comp_ctx, LLVMValueRef branch);
+
+
 bool
 aot_set_cond_br_weights(AOTCompContext *comp_ctx, LLVMValueRef cond_br,
                         int32 weights_true, int32 weights_false);

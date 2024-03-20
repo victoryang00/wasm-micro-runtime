@@ -50,6 +50,8 @@
 #include <llvm/Transforms/Vectorize/LoopVectorize.h>
 #include <llvm/Transforms/Vectorize/LoadStoreVectorizer.h>
 #include <llvm/Transforms/Vectorize/SLPVectorizer.h>
+#include <llvm/Transforms/Scalar/LoopUnrollPass.h>
+#include "llvm/Analysis/LoopInfo.h"
 #include <llvm/Transforms/Scalar/LoopRotation.h>
 #include <llvm/Transforms/Scalar/SimpleLoopUnswitch.h>
 #include <llvm/Transforms/Scalar/LICM.h>
@@ -252,7 +254,8 @@ struct AddNopPass : public PassInfoMixin<AddNopPass> {
                     dummy_inst->setDebugLoc(
                         DILocation::get(context, getLineNo(), 2, sp));
 
-                    auto fence_inst = builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
+                    auto fence_inst = builder.CreateFence(
+                        AtomicOrdering::SequentiallyConsistent);
                     fence_inst->setDebugLoc(
                         DILocation::get(context, getLineNo(), 514, sp));
 
@@ -279,7 +282,9 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
         reinterpret_cast<TargetMachine *>(comp_ctx->target_machine);
     PipelineTuningOptions PTO;
     PTO.LoopVectorization = true;
-    PTO.SLPVectorization = false;
+    PTO.LoopUnrolling = true;
+    PTO.LoopInterleaving = true;
+    PTO.SLPVectorization = true;
     PTO.LoopUnrolling = true;
 
 #if LLVM_VERSION_MAJOR >= 16
@@ -400,6 +405,7 @@ aot_apply_llvm_new_pass_manager(AOTCompContext *comp_ctx, LLVMModuleRef module)
         FunctionPassManager FPM;
 
         /* Apply Vectorize related passes for AOT mode */
+        FPM.addPass(LoopUnrollPass());
         FPM.addPass(LoopVectorizePass());
         // FPM.addPass(SLPVectorizerPass());
         FPM.addPass(LoadStoreVectorizerPass());
@@ -483,7 +489,9 @@ aot_apply_mvvm_pass(AOTCompContext *comp_ctx, LLVMModuleRef module)
     FunctionPassManager mvvm_fpm;
     mvvm_fpm.addPass(AddNopPass());
     MPM.addPass(createModuleToFunctionPassAdaptor(std::move(mvvm_fpm)));
-
+    mvvm_fpm.addPass(LoopUnrollPass());
+    mvvm_fpm.addPass(LoopVectorizePass());
+    // mvvm_fpm.addPass(LoopInterleavePass());
     MPM.run(*M, MAM);
 }
 
@@ -516,4 +524,35 @@ aot_compress_aot_func_names(AOTCompContext *comp_ctx, uint32 *p_size)
                 compressed_str_len);
     *p_size = compressed_str_len;
     return compressed_str;
+}
+
+void
+aot_block_add_unroll_pass(AOTCompContext *comp_ctx, LLVMValueRef branch)
+{
+    auto &context = *reinterpret_cast<llvm::LLVMContext *>(
+        comp_ctx->context); // Use auto for type deduction to keep code clean
+                            // and flexible.
+    llvm::BranchInst *block = reinterpret_cast<llvm::BranchInst *>(branch);
+    llvm::Module *module = reinterpret_cast<llvm::Module *>(comp_ctx->module);
+    llvm::SmallVector<llvm::Metadata *, 4> loopMetadata;
+
+    auto tempNode = llvm::MDNode::getTemporary(context, {});
+    loopMetadata.push_back(tempNode.get());
+
+    llvm::MDNode *unrollMetadata = llvm::MDNode::get(
+        context, llvm::MDString::get(context, "llvm.loop.unroll.full"));
+    llvm::MDNode *vectorizeMetadata = llvm::MDNode::get(
+        context, llvm::MDString::get(context, "llvm.loop.vectorize.assume_safe"));
+    llvm::MDNode *interleaveMetadata = llvm::MDNode::get(
+        context, llvm::MDString::get(context, "llvm.loop.interleave.enable"));
+
+    // Create a metadata node that combines the pragma hints
+    loopMetadata.push_back(unrollMetadata);
+    loopMetadata.push_back(vectorizeMetadata);
+    loopMetadata.push_back(interleaveMetadata);
+    llvm::MDNode *pragmaMetadata = llvm::MDNode::get(context, loopMetadata);
+
+    auto loopID = llvm::MDNode::get(context, loopMetadata);
+    loopID->replaceOperandWith(0, loopID);
+    block->setMetadata("llvm.loop", loopID);
 }

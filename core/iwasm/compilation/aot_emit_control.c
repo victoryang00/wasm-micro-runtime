@@ -999,8 +999,12 @@ aot_compile_op_br_if(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
                 values = NULL;
             }
 
-            BUILD_COND_BR(value_cmp, block_dst->llvm_entry_block,
-                          llvm_else_block);
+            // BUILD_COND_BR(value_cmp, block_dst->llvm_entry_block,
+            //   llvm_else_block);
+            LLVMValueRef block =
+                LLVMBuildCondBr(comp_ctx->builder, value_cmp,
+                                block_dst->llvm_entry_block, llvm_else_block);
+            aot_block_add_unroll_pass(comp_ctx, block);
 
             /* Move builder to else block */
             SET_BUILDER_POS(llvm_else_block);

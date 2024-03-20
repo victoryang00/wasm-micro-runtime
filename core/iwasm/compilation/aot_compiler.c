@@ -670,9 +670,6 @@ aot_gen_restore_values(AOTCompFrame *frame)
     }
 
     return true;
-
-fail:
-    return false;
 }
 
 bool
@@ -1148,9 +1145,8 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     LLVMValueRef counter = LLVMBuildLoad2(
                         comp_ctx->builder, I32_TYPE, last_loop_counter, "counter");
                     LLVMValueRef counter_inc = LLVMBuildAdd(
-                        comp_ctx->builder, counter, I32_ONE, "counter_inc");
+                        comp_ctx->builder, counter,  I32_CONST(1), "counter_inc");
                     LLVMBuildStore(comp_ctx->builder, counter_inc, last_loop_counter);
-
                     const int threshold = 1 << 20;
 
                     LLVMBasicBlockRef normal_block, ckpt_block;
@@ -1173,11 +1169,10 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                         goto fail;
                     }
 
-                    // counter > threshold, then goto checkpoint, else goto normal
-                    LLVMValueRef cond = LLVMBuildICmp(comp_ctx->builder, LLVMIntULT,
-                                                    counter_inc, I32_CONST(threshold),
-                                                    "cond");
-                    LLVMBuildCondBr(comp_ctx->builder, cond, normal_block, ckpt_block);
+                    LLVMValueRef andvar = LLVMBuildAnd(comp_ctx->builder, counter, I32_CONST(threshold-1), "andvar");
+                    LLVMValueRef cond = LLVMBuildICmp(comp_ctx->builder, LLVMIntEQ, andvar, I32_CONST(0), "cond");
+
+                    LLVMBuildCondBr(comp_ctx->builder, cond, ckpt_block, normal_block);
                     LLVMPositionBuilderAtEnd(comp_ctx->builder, ckpt_block);
 
                     // TODO(huab): find a better way to commit locals
@@ -1186,9 +1181,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     // checkpoint
                     comp_ctx->checkpoint_type = 1;
                     aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip);
-
-                    // reset the counter
-                    LLVMBuildStore(comp_ctx->builder, I32_ZERO, last_loop_counter);
 
                     LLVMBuildBr(comp_ctx->builder, normal_block);
 
