@@ -40,6 +40,14 @@ bh_static_assert(offsetof(WASMExecEnv, aux_stack_bottom)
 bh_static_assert(offsetof(WASMExecEnv, native_symbol) == 8 * sizeof(uintptr_t));
 bh_static_assert(offsetof(WASMExecEnv, native_stack_top_min)
                  == 9 * sizeof(uintptr_t));
+bh_static_assert(offsetof(WASMExecEnv, wasm_stack.top_boundary)
+                 == 10 * sizeof(uintptr_t));
+bh_static_assert(offsetof(WASMExecEnv, wasm_stack.top)
+                 == 11 * sizeof(uintptr_t));
+bh_static_assert(offsetof(WASMExecEnv, wasm_stack.bottom)
+                 == 12 * sizeof(uintptr_t));
+bh_static_assert(offsetof(WASMExecEnv, call_chain_size)
+                 == 13 * sizeof(uintptr_t));
 
 bh_static_assert(offsetof(AOTModuleInstance, memories) == 1 * sizeof(uint64));
 bh_static_assert(offsetof(AOTModuleInstance, func_ptrs) == 5 * sizeof(uint64));
@@ -59,7 +67,11 @@ bh_static_assert(offsetof(AOTFrame, ip_offset) == sizeof(uintptr_t) * 4);
 bh_static_assert(offsetof(AOTFrame, sp) == sizeof(uintptr_t) * 5);
 bh_static_assert(offsetof(AOTFrame, frame_ref) == sizeof(uintptr_t) * 6);
 bh_static_assert(offsetof(AOTFrame, lp) == sizeof(uintptr_t) * 7);
-
+bh_static_assert(offsetof(AOTFrame, prev_frame) == sizeof(uintptr_t) * 0);
+bh_static_assert(offsetof(AOTFrame, func_index) == sizeof(uintptr_t) * 1);
+bh_static_assert(offsetof(AOTFrame, time_started) == sizeof(uintptr_t) * 2);
+bh_static_assert(offsetof(AOTFrame, func_perf_prof_info)
+                 == sizeof(uintptr_t) * 3);
 static void
 set_error_buf(char *error_buf, uint32 error_buf_size, const char *string)
 {
@@ -2232,14 +2244,16 @@ aot_call_indirect(WASMExecEnv *exec_env, uint32 tbl_idx, uint32 table_elem_idx,
 
     func_idx = tbl_inst->elems[table_elem_idx];
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (exec_env->is_restore && exec_env->restore_call_chain) {
-        struct AOTFrame *rcc = *(exec_env->restore_call_chain);
-        while (rcc->prev_frame) {
-            rcc = rcc->prev_frame;
-        }
-        LOG_DEBUG("func_idx: %d instead of %d of thread %ld\n", rcc->func_index,
-                  func_idx, exec_env->handle);
-        func_idx = rcc->func_index;
+    if (exec_env->is_restore && exec_env->call_chain_size) {
+        // struct AOTFrame *rcc = *(exec_env->restore_call_chain);
+        // while (rcc->prev_frame) {
+        //     rcc = rcc->prev_frame;
+        // }
+        // LOG_DEBUG("func_idx: %d instead of %d of thread %ld\n", rcc->func_index,
+        //           func_idx, exec_env->handle);
+        // func_idx = rcc->func_index;
+        printf("no impl, exit\n");
+        exit(-1);
     }
 #endif
     if (func_idx == NULL_REF) {
@@ -2894,27 +2908,6 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     AOTFrame *frame;
     uint32 max_local_cell_num, max_stack_cell_num, all_cell_num;
     uint32 aot_func_idx, frame_size;
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (exec_env->restore_call_chain) {
-        frame = exec_env->restore_call_chain[exec_env->call_chain_size - 1];
-        LOG_DEBUG("frame restored, func idx %zu\n", frame->func_index);
-        exec_env->call_chain_size--;
-        frame->prev_frame = (AOTFrame *)exec_env->cur_frame;
-        exec_env->cur_frame = (struct WASMInterpFrame *)frame;
-        if (exec_env->call_chain_size == 0) {
-            // TODO: fix memory leak
-            exec_env->restore_call_chain = NULL;
-                    }
-        LOG_DEBUG("restore call chain %zu==%u, %p, %p, %d\n",
-                ((AOTFrame *)exec_env->cur_frame)->func_index, func_index,
-                exec_env, exec_env->restore_call_chain, exec_env->handle);
-        if (((AOTFrame *)exec_env->cur_frame)->func_index != func_index) {
-            LOG_DEBUG("NOT MATCH!!!\n");
-            exit(1);
-        }
-        return true;
-    }
-#endif
 
     if (func_index >= module->import_func_count) {
         aot_func_idx = func_index - module->import_func_count;
@@ -2935,28 +2928,39 @@ aot_alloc_frame(WASMExecEnv *exec_env, uint32 func_index)
     frame_size =
         (uint32)offsetof(AOTFrame, lp) + align_uint(all_cell_num * 5, 4);
 #endif
-    frame = wasm_exec_env_alloc_wasm_frame(exec_env, frame_size);
+    // frame = wasm_exec_env_alloc_wasm_frame(exec_env, frame_size);
+    // if (!frame) {
+    //     aot_set_exception((AOTModuleInstance *)exec_env->module_inst,
+    //                       "wasm operand stack overflow");
+    //     return false;
+    // }
 
-    if (!frame) {
+    frame = (AOTFrame*)exec_env->wasm_stack.top;
+    exec_env->wasm_stack.top += frame_size;
+    if (exec_env->wasm_stack.top > exec_env->wasm_stack.top_boundary) {
         aot_set_exception((AOTModuleInstance *)exec_env->module_inst,
                           "wasm operand stack overflow");
         return false;
     }
-
 #if WASM_ENABLE_PERF_PROFILING != 0
     frame->time_started = (uintptr_t)os_time_get_boot_microsecond();
     frame->func_perf_prof_info = func_perf_prof;
 #endif
-    frame->ip_offset = 0;
-    frame->sp = frame->lp + max_local_cell_num;
-#if WASM_ENABLE_GC != 0
-    frame->frame_ref = frame->sp + max_stack_cell_num;
-#endif
 
-    frame->prev_frame = (AOTFrame *)exec_env->cur_frame;
+    if (!exec_env->call_chain_size) {
+        frame->func_index = func_index;
+        frame->ip_offset = 0;
+        frame->sp = frame->lp + max_local_cell_num;
+#if WASM_ENABLE_GC != 0
+        frame->frame_ref = frame->sp + max_stack_cell_num;
+#endif
+        frame->prev_frame = (AOTFrame *)exec_env->cur_frame;
+    } else {
+        // fprintf(stderr, "restore %u\n", func_index);
+        exec_env->call_chain_size--;
+    }
     exec_env->cur_frame = (struct WASMInterpFrame *)frame;
 
-    frame->func_index = func_index;
     return true;
 }
 
@@ -2975,18 +2979,9 @@ aot_free_frame(WASMExecEnv *exec_env)
         (uintptr_t)os_time_get_boot_microsecond() - cur_frame->time_started;
     cur_frame->func_perf_prof_info->total_exec_cnt++;
 #endif
-    wasm_exec_env_free_wasm_frame(exec_env, cur_frame);
+    // wasm_exec_env_free_wasm_frame(exec_env, cur_frame);
     exec_env->cur_frame = (struct WASMInterpFrame *)prev_frame;
-#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    if (func_index == stop_func_index && is_debug) {
-        LOG_DEBUG("cur_func_count %d %d\n", cur_func_count,
-                  stop_func_threshold);
-        if (cur_func_count == stop_func_threshold) {
-            serialize_to_file(exec_env);
-        }
-        cur_func_count++;
-    }
-#endif
+    exec_env->wasm_stack.top = (uint8*)cur_frame;
 }
 #endif /* end of WASM_ENABLE_AOT_STACK_FRAME != 0 */
 

@@ -683,34 +683,66 @@ wasm_string_equal(const char *s1, const char *s2)
     return strcmp(s1, s2) == 0 ? true : false;
 }
 
+
+/**
+ * Return the byte size of value type with specific pointer size.
+ *
+ * Note: Please use wasm_value_type_size for interpreter, only aot compiler
+ * can use this API directly to calculate type size for different target
+ */
+inline static uint32
+wasm_value_type_size_internal(uint8 value_type, uint8 pointer_size)
+{
+    if (value_type == VALUE_TYPE_VOID)
+        return 0;
+    else if (value_type == VALUE_TYPE_I32 || value_type == VALUE_TYPE_F32
+             || value_type == VALUE_TYPE_ANY)
+        return sizeof(int32);
+    else if (value_type == VALUE_TYPE_I64 || value_type == VALUE_TYPE_F64)
+        return sizeof(int64);
+#if WASM_ENABLE_SIMD != 0
+    else if (value_type == VALUE_TYPE_V128)
+        return sizeof(int64) * 2;
+#endif
+#if WASM_ENABLE_GC == 0 && WASM_ENABLE_REF_TYPES != 0
+    else if (value_type == VALUE_TYPE_FUNCREF
+             || value_type == VALUE_TYPE_EXTERNREF)
+        return sizeof(uint32);
+#elif WASM_ENABLE_GC != 0
+    else if (
+#if WASM_ENABLE_STRINGREF != 0
+        value_type >= (uint8)REF_TYPE_STRINGVIEWITER /* 0x61 */
+#else
+        value_type >= (uint8)REF_TYPE_NULLREF /* 0x65 */
+#endif
+        && value_type <= (uint8)REF_TYPE_FUNCREF /* 0x70 */)
+        return pointer_size;
+#endif
+    else {
+        bh_assert(0);
+    }
+    return 0;
+}
+
+/**
+ * Return the cell num of value type with specific pointer size.
+ *
+ * Note: Please use wasm_value_type_cell_num for interpreter, only aot compiler
+ * can use this API directly to calculate type cell num for different target
+ */
+inline static uint16
+wasm_value_type_cell_num_internal(uint8 value_type, uint8 pointer_size)
+{
+    return wasm_value_type_size_internal(value_type, pointer_size) / 4;
+}
+
 /**
  * Return the byte size of value type.
- *
  */
 inline static uint32
 wasm_value_type_size(uint8 value_type)
 {
-    switch (value_type) {
-        case VALUE_TYPE_I32:
-        case VALUE_TYPE_F32:
-#if WASM_ENABLE_REF_TYPES != 0
-        case VALUE_TYPE_FUNCREF:
-        case VALUE_TYPE_EXTERNREF:
-#endif
-            return sizeof(int32);
-        case VALUE_TYPE_I64:
-        case VALUE_TYPE_F64:
-            return sizeof(int64);
-#if WASM_ENABLE_SIMD != 0
-        case VALUE_TYPE_V128:
-            return sizeof(int64) * 2;
-#endif
-        case VALUE_TYPE_VOID:
-            return 0;
-        default:
-            bh_assert(0);
-    }
-    return 0;
+    return wasm_value_type_size_internal(value_type, sizeof(uintptr_t));
 }
 
 inline static uint16

@@ -8457,7 +8457,7 @@ jit_codegen_compile_call_to_llvm_jit(const WASMType *func_type)
     /* r10 = outs_area->lp */
     {
         a64::Mem m(regs_i64[hreg_info->exec_env_hreg_index],
-                   (uint32)offsetof(WASMExecEnv, wasm_stack.s.top));
+                   (uint32)offsetof(WASMExecEnv, wasm_stack.top));
         a.mov(reg_lp, m);
         a.add(reg_lp, (uint32)offsetof(WASMInterpFrame, lp));
     }
@@ -8697,15 +8697,15 @@ fast_jit_alloc_frame(WASMExecEnv *exec_env, uint32 param_cell_num,
      * frame to store the function results from jit function to call,
      * the second is the frame for the jit function
      */
-    if ((uint8 *)exec_env->wasm_stack.s.top + size_frame1 + size_frame2
-        > exec_env->wasm_stack.s.top_boundary) {
+    if ((uint8 *)exec_env->wasm_stack.top + size_frame1 + size_frame2
+        > exec_env->wasm_stack.top_boundary) {
         wasm_set_exception(module_inst, "wasm operand stack overflow");
         return NULL;
     }
 
     /* Allocate the frame */
-    frame = (WASMInterpFrame *)exec_env->wasm_stack.s.top;
-    exec_env->wasm_stack.s.top += size_frame1;
+    frame = (WASMInterpFrame *)exec_env->wasm_stack.top;
+    exec_env->wasm_stack.top += size_frame1;
 
     frame->function = NULL;
     frame->ip = NULL;
@@ -9069,9 +9069,9 @@ jit_codegen_compile_call_to_fast_jit(const WASMModule *module, uint32 func_idx)
     /* rdx = exec_env->cur_frame->prev_frame */
     a.mov(a64::rdx,
           a64::ptr(a64::rsi, (uint32)offsetof(WASMInterpFrame, prev_frame)));
-    /* exec_env->wasm_stack.s.top = cur_frame */
+    /* exec_env->wasm_stack.top = cur_frame */
     {
-        a64::Mem m(a64::rdi, offsetof(WASMExecEnv, wasm_stack.s.top));
+        a64::Mem m(a64::rdi, offsetof(WASMExecEnv, wasm_stack.top));
         a.mov(m, a64::rsi);
     }
     /* exec_env->cur_frame = prev_frame */

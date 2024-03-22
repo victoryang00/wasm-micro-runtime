@@ -670,7 +670,7 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
     uint32 aux_stack_start = 0, aux_stack_size;
     korp_tid tid;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    void* save_restore_call_chain = NULL;
+    size_t save_restore_call_chain_size = 0;
     bool is_restore = false;
 #endif
 
@@ -688,11 +688,11 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
         // Don't generate a new env on restore
         new_exec_env = restore_env(module_inst);
         printf("restored child env\n");
-        save_restore_call_chain = new_exec_env->restore_call_chain;
+        save_restore_call_chain_size = new_exec_env->call_chain_size;
         is_restore = true;
-        exec_env->restore_call_chain = NULL;
+        exec_env->call_chain_size = 0;
         exec_env->is_restore = false;
-        fprintf(stderr, "thread mgr: save_restore_call_chain %p\n", save_restore_call_chain);
+        fprintf(stderr, "thread mgr: save_restore_call_chain_size %zu\n", save_restore_call_chain_size);
     }
     else {
 #endif
@@ -743,7 +743,7 @@ wasm_cluster_create_thread(WASMExecEnv *exec_env,
 
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
     if (is_restore) {
-        exec_env->restore_call_chain = save_restore_call_chain;
+        exec_env->call_chain_size = save_restore_call_chain_size;
         exec_env->is_restore = true;
     }
 #endif
