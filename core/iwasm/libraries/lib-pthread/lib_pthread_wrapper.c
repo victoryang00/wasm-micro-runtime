@@ -618,7 +618,7 @@ pthread_create_wrapper(wasm_exec_env_t exec_env,
     routine_args->info_node = info_node;
     routine_args->module_inst = new_module_inst;
 #if WASM_ENABLE_CHECKPOINT_RESTORE != 0
-    insert_parent_child(exec_env->handle, routine_args->arg);
+    insert_parent_child(((uint64_t)exec_env->handle), routine_args->arg);
 #endif
     os_mutex_lock(&exec_env->wait_lock);
     ret =

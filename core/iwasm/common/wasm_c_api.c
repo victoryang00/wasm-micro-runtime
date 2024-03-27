@@ -26,7 +26,9 @@
 #if WASM_ENABLE_THREAD_MGR != 0
 #include "thread_manager.h"
 #endif
-
+#if WASM_ENABLE_CHECKPOINT_RESTORE != 0
+#include "../../../../../../../include/wamr_export.h"
+#endif
 /*
  * Thread Model:
  * - Only one wasm_engine_t in one process
