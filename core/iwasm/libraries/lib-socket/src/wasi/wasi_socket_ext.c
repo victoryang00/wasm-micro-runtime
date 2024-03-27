@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <wasi_socket_ext.h>
+#include <stdio.h>
 
 #define HANDLE_ERROR(error)              \
     if (error != __WASI_ERRNO_SUCCESS) { \
@@ -81,23 +82,23 @@ s_(int domain, int socktype, int protocol, uint32_t sockfd)
     free(failed_array);
     return ret;
 }
-int
-o_(char *path, int fd, int offset)
-{
+int o_(char *path, int fd) {
     int flags = O_RDWR | O_CREAT;
-    int *failed_array = malloc(100 * sizeof(int));
+    int *failed_array = (int *)malloc(100 * sizeof(int));
     int counter = 0;
     int ret = open(path, flags);
+    printf("ret %d %s %d\n", ret, path, errno);
     while (ret != fd) {
         failed_array[counter] = ret;
         counter += 1;
         ret = open(path, flags);
+        printf("ret %d %s %d\n", ret, path, errno);
     }
     for (int i = 0; i < counter; i++) {
         close(failed_array[i]);
     }
     free(failed_array);
-    return fd;
+    return ret;
 }
 void
 si_(int socket_fd)
