@@ -1615,7 +1615,7 @@ aot_create_func_context(const AOTCompData *comp_data, AOTCompContext *comp_ctx,
         goto fail;
     }
 
-    if (comp_ctx->enable_aux_stack_frame) {
+    if (comp_ctx->enable_aux_stack_frame && !skip_func(comp_ctx->aot_file_name, func_index)) {
         if (!alloc_frame_for_aot_func(comp_ctx, func_ctx, func_index + module->import_function_count))
             goto fail;
 

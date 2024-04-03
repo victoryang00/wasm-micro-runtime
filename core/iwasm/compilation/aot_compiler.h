@@ -658,6 +658,8 @@ char *
 aot_generate_tempfile_name(const char *prefix, const char *extension,
                            char *buffer, uint32 len);
 
+bool skip_func(const char *aot_file_name, uint32 func_idx);
+
 #ifdef __cplusplus
 } /* end of extern "C" */
 #endif

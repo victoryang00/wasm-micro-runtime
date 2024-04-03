@@ -1032,6 +1032,54 @@ static bool pgo_skip_loop(const char *aot_file_name, uint32 func_idx, uint64 ip)
     return false;
 }
 
+bool skip_func(const char *aot_file_name, uint32 func_idx) {
+    static uint32* func_list = NULL;
+    static int n = -1;
+    if (n == -1) {
+        n = 0;
+        // f"{aot_file_name}.pgo"
+        const char *suffix = ".simple_func.opt";
+        char *opt_file_name = (char*)malloc(strlen(aot_file_name) + strlen(suffix) + 1);
+        strcpy(opt_file_name, aot_file_name);
+        strcat(opt_file_name, suffix);
+        FILE* f = fopen(opt_file_name, "r");
+        if (!f) {
+            return false;
+        }
+        // fprintf(stderr, "skip_func %s\n", opt_file_name);
+        n = 0;
+        int capacity = 1;
+        uint32 func;
+        func_list = (uint32*)malloc(capacity * sizeof(uint32));
+        while (fscanf(f, "%d", &func) != EOF) {
+            if (n == capacity) {
+                capacity *= 2;
+                func_list = (uint32*)realloc(func_list, capacity * sizeof(uint32));
+            }
+            func_list[n++] = func;
+        }
+        free(opt_file_name);
+    }
+    for (int i = 0; i < n; i++) {
+        if (func_list[i] == func_idx) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void append_simple_func(const char *aot_file_name, uint32 func_idx) {
+    static FILE* f = NULL;
+    if (f == NULL) {
+        // f"{aot_file_name}.simple_func"
+        char *simple_func_file_name = (char*)malloc(strlen(aot_file_name) + 14);
+        strcpy(simple_func_file_name, aot_file_name);
+        strcat(simple_func_file_name, ".simple_func");
+        f = fopen(simple_func_file_name, "w");
+    }
+    fprintf(f, "%d\n", func_idx);
+}
+
 static bool
 aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 {
@@ -1055,9 +1103,31 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
     AOTFuncType *func_type = NULL;
     bool last_op_is_loop = false;
     LLVMValueRef last_loop_counter = NULL;
+    bool is_simple_func = true;
 #if WASM_ENABLE_DEBUG_AOT != 0
     LLVMMetadataRef location;
 #endif
+
+    // printf("compile func %d\n", func_index);
+
+    bool enable_aux_stack_frame = comp_ctx->enable_aux_stack_frame;
+    bool enable_checkpoint = comp_ctx->enable_checkpoint;
+    bool enable_loop_checkpoint = comp_ctx->enable_loop_checkpoint;
+    bool enable_br_checkpoint = comp_ctx->enable_br_checkpoint;
+    bool enable_every_checkpoint = comp_ctx->enable_every_checkpoint;
+    bool enable_counter_loop_checkpoint = comp_ctx->enable_counter_loop_checkpoint;
+    bool enable_checkpoint_pgo = comp_ctx->enable_checkpoint_pgo;
+    if (skip_func(comp_ctx->aot_file_name, func_index)) {
+        comp_ctx->enable_aux_stack_frame = false;
+        comp_ctx->enable_checkpoint = false;
+        comp_ctx->enable_loop_checkpoint = false;
+        comp_ctx->enable_br_checkpoint = false;
+        comp_ctx->enable_every_checkpoint = false;
+        comp_ctx->enable_counter_loop_checkpoint = false;
+        comp_ctx->enable_checkpoint_pgo = false;
+        comp_ctx->aot_frame = NULL;
+        // printf("skip func %d\n", func_index);
+    }
 
     if (comp_ctx->enable_aux_stack_frame) {
         if (!init_comp_frame(comp_ctx, func_ctx, func_index)) {
@@ -1216,6 +1286,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_LOOP:
             {
                 if (opcode == WASM_OP_LOOP) {
+                    is_simple_func = false;
                     last_op_is_loop = true;
                 }
                 if (comp_ctx->enable_loop_checkpoint) {
@@ -1398,14 +1469,21 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_CALL:
             {
+                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
-                if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
-                    bh_assert(comp_ctx->aot_frame);
-                    comp_ctx->checkpoint_type = 0;
-                    aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
-                }
 
                 read_leb_uint32(frame_ip, frame_ip_end, func_idx);
+
+                uint32 import_func_count = comp_ctx->comp_data->import_func_count;
+                uint32 aot_compile_func_idx = func_idx - import_func_count;
+                if (!skip_func(comp_ctx->aot_file_name, aot_compile_func_idx)) {
+                    if (comp_ctx->enable_checkpoint && !comp_ctx->inst_checkpointed) {
+                        bh_assert(comp_ctx->aot_frame);
+                        comp_ctx->checkpoint_type = 0;
+                        aot_gen_checkpoint(comp_ctx, func_ctx, frame_ip_org);
+                    }
+                }
+
                 if (!aot_compile_op_call(comp_ctx, func_ctx, func_idx, false,
                                          frame_ip_org))
                     return false;
@@ -1414,6 +1492,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_CALL_INDIRECT:
             {
+                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
@@ -1445,6 +1524,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 #if WASM_ENABLE_TAIL_CALL != 0
             case WASM_OP_RETURN_CALL:
             {
+                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
 
                 if (!comp_ctx->enable_tail_call) {
@@ -1462,6 +1542,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_RETURN_CALL_INDIRECT:
             {
+                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
@@ -3667,6 +3748,19 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         if (last_block != func_ctx->got_exception_block)
             LLVMMoveBasicBlockAfter(func_ctx->got_exception_block, last_block);
     }
+
+    if (is_simple_func) {
+        append_simple_func(comp_ctx->aot_file_name, func_index);
+    }
+
+    comp_ctx->enable_aux_stack_frame = enable_aux_stack_frame;
+    comp_ctx->enable_checkpoint = enable_checkpoint;
+    comp_ctx->enable_loop_checkpoint = enable_loop_checkpoint;
+    comp_ctx->enable_br_checkpoint = enable_br_checkpoint;
+    comp_ctx->enable_every_checkpoint = enable_every_checkpoint;
+    comp_ctx->enable_counter_loop_checkpoint = enable_counter_loop_checkpoint;
+    comp_ctx->enable_checkpoint_pgo = enable_checkpoint_pgo;
+
     return true;
 
 #if WASM_ENABLE_SIMD != 0
