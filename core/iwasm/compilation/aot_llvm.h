@@ -404,6 +404,7 @@ typedef struct AOTCompContext {
     bool inst_checkpointed;
     bool enable_aux_stack_dirty_bit;
     bool enable_counter_loop_checkpoint;
+    uint32_t checkpoint_freq;
     bool enable_checkpoint_pgo;
     const char *aot_file_name;
     bool exp_disable_stack_commit_before_block;
@@ -531,6 +532,7 @@ typedef struct AOTCompOption {
     bool enable_every_checkpoint;
     bool enable_aux_stack_dirty_bit;
     bool enable_counter_loop_checkpoint;
+    uint32_t checkpoint_freq;
     bool enable_checkpoint_pgo;
     const char *aot_file_name;
     bool exp_disable_stack_commit_before_block;

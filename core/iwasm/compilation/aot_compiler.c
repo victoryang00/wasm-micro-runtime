@@ -1217,7 +1217,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     LLVMValueRef counter_inc = LLVMBuildAdd(
                         comp_ctx->builder, counter,  I32_CONST(1), "counter_inc");
                     LLVMBuildStore(comp_ctx->builder, counter_inc, last_loop_counter);
-                    const int threshold = 1 << 20;
+                    const int threshold = comp_ctx->checkpoint_freq;
 
                     LLVMBasicBlockRef normal_block, ckpt_block;
                     char name[32];

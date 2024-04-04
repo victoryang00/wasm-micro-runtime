@@ -2419,8 +2419,14 @@ aot_create_comp_context(const AOTCompData *comp_data, aot_comp_option_t option)
     if (option->enable_every_checkpoint)
         comp_ctx->enable_every_checkpoint = true;
 
-    if (option->enable_counter_loop_checkpoint)
+    if (option->enable_counter_loop_checkpoint) {
         comp_ctx->enable_counter_loop_checkpoint = true;
+        if (option->checkpoint_freq == 0) {
+            comp_ctx->checkpoint_freq = (1<<12);
+        } else {
+            comp_ctx->checkpoint_freq = option->checkpoint_freq;            
+        }
+    }
 
     if (option->enable_checkpoint_pgo)
         comp_ctx->enable_checkpoint_pgo = true;

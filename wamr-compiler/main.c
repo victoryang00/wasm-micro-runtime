@@ -479,6 +479,12 @@ main(int argc, char *argv[])
             option.enable_checkpoint = true;
             option.enable_loop_checkpoint = true;
             option.enable_counter_loop_checkpoint = true;
+        } else if (!strncmp(argv[0], "--checkpoint-freq=", 18)) {
+            if (argv[0][18] == '\0')
+                PRINT_HELP_AND_EXIT();
+            uint32 freq = atoi(argv[0] + 18);
+            printf("checkpoint freq: %u\n", freq);;
+            option.checkpoint_freq = freq;
         }
         else if (!strcmp(argv[0], "--enable-checkpoint-pgo")) {
             option.enable_checkpoint_pgo = true;
