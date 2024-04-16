@@ -439,7 +439,7 @@ aot_gen_commit_values(AOTCompFrame *frame, bool reset_dirty_bit)
 
 
 bool
-aot_gen_commit_all_locals(AOTCompFrame *frame)
+aot_gen_commit_locals(AOTCompFrame *frame, uint32 n_locals, uint32* locals)
 {
     AOTCompContext *comp_ctx = frame->comp_ctx;
     AOTFuncContext *func_ctx = frame->func_ctx;
@@ -454,6 +454,17 @@ aot_gen_commit_all_locals(AOTCompFrame *frame)
         p = frame->lp, local_idx = 0;
         local_idx < total_locals;
         p++, local_idx++) {
+
+        bool found = false;
+        for (uint32 i = 0; i < n_locals; i++) {
+            if (local_idx == locals[i]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            continue;
+        }
 
         n = (p) - frame->lp;
         llvm_value_type = TO_LLVM_TYPE(p->type);
@@ -1037,7 +1048,6 @@ bool skip_func(const char *aot_file_name, uint32 func_idx) {
     static int n = -1;
     if (n == -1) {
         n = 0;
-        // f"{aot_file_name}.pgo"
         const char *suffix = ".simple_func.opt";
         char *opt_file_name = (char*)malloc(strlen(aot_file_name) + strlen(suffix) + 1);
         strcpy(opt_file_name, aot_file_name);
@@ -1046,19 +1056,11 @@ bool skip_func(const char *aot_file_name, uint32 func_idx) {
         if (!f) {
             return false;
         }
-        // fprintf(stderr, "skip_func %s\n", opt_file_name);
-        n = 0;
-        int capacity = 1;
-        uint32 func;
-        func_list = (uint32*)malloc(capacity * sizeof(uint32));
-        while (fscanf(f, "%d", &func) != EOF) {
-            if (n == capacity) {
-                capacity *= 2;
-                func_list = (uint32*)realloc(func_list, capacity * sizeof(uint32));
-            }
-            func_list[n++] = func;
+        fscanf(f, "%d", &n);
+        func_list = (uint32*)malloc(n * sizeof(uint32));
+        for (int i = 0; i < n; i++) {
+            fscanf(f, "%d", &func_list[i]);
         }
-        free(opt_file_name);
     }
     for (int i = 0; i < n; i++) {
         if (func_list[i] == func_idx) {
@@ -1068,16 +1070,84 @@ bool skip_func(const char *aot_file_name, uint32 func_idx) {
     return false;
 }
 
-static void append_simple_func(const char *aot_file_name, uint32 func_idx) {
-    static FILE* f = NULL;
-    if (f == NULL) {
-        // f"{aot_file_name}.simple_func"
-        char *simple_func_file_name = (char*)malloc(strlen(aot_file_name) + 14);
-        strcpy(simple_func_file_name, aot_file_name);
-        strcat(simple_func_file_name, ".simple_func");
-        f = fopen(simple_func_file_name, "w");
+static bool skip_loop_ckpt(const char *aot_file_name, uint32 func_idx, uint32 loop_cnt) {
+    struct Item {
+        uint32 func_idx;
+        uint32 loop_cnt;
+    };
+
+    static int n = -1;
+    static struct Item* items = NULL;
+    if (n == -1) {
+        n = 0;
+        const char *suffix = ".skip_ckpt.opt";
+        char *opt_file_name = (char*)malloc(strlen(aot_file_name) + strlen(suffix) + 1);
+        strcpy(opt_file_name, aot_file_name);
+        strcat(opt_file_name, suffix);
+        FILE* f = fopen(opt_file_name, "r");
+        if (!f) {
+            return false;
+        }
+        fscanf(f, "%d", &n);
+        items = (struct Item*)malloc(n * sizeof(struct Item));
+        for (int i = 0; i < n; i++) {
+            struct Item* item = &items[i];
+            fscanf(f, "%d %d", &item->func_idx, &item->loop_cnt);
+        }
     }
-    fprintf(f, "%d\n", func_idx);
+
+    for (int i = 0; i < n; i++) {
+        struct Item* item = &items[i];
+        if (item->func_idx == func_idx && item->loop_cnt == loop_cnt) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool get_modified_locals_in_loop(const char *aot_file_name, uint32 func_idx, uint32 loop_cnt, uint32* n_locals, uint32** local_list) {
+    struct Item {
+        uint32 func_idx;
+        uint32 loop_cnt;
+        uint32 n;
+        uint32* local_list;
+    };
+
+    static int n = -1;
+    static struct Item* items = NULL;
+    if (n == -1) {
+        n = 0;
+        const char *suffix = ".modified_locals.opt";
+        char *opt_file_name = (char*)malloc(strlen(aot_file_name) + strlen(suffix) + 1);
+        strcpy(opt_file_name, aot_file_name);
+        strcat(opt_file_name, suffix);
+        FILE* f = fopen(opt_file_name, "r");
+        if (!f) {
+            fprintf(stderr, "failed to open %s\n", opt_file_name);
+            return false;
+        }
+        fscanf(f, "%d", &n);
+        items = (struct Item*)malloc(n * sizeof(struct Item));
+        for (int i = 0; i < n; i++) {
+            struct Item* item = &items[i];
+            fscanf(f, "%d %d %d", &item->func_idx, &item->loop_cnt, &item->n);
+            item->local_list = (uint32*)malloc(item->n * sizeof(uint32));
+            for (uint32 j = 0; j < item->n; j++) {
+                fscanf(f, "%d", &item->local_list[j]);
+            }
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        struct Item* item = &items[i];
+        if (item->func_idx == func_idx && item->loop_cnt == loop_cnt) {
+            *n_locals = item->n;
+            *local_list = item->local_list;
+            return true;
+        }
+    }
+    fprintf(stderr, "failed to find modified locals for func %d loop %d\n", func_idx, loop_cnt);
+    return false;
 }
 
 static bool
@@ -1103,10 +1173,11 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
     AOTFuncType *func_type = NULL;
     bool last_op_is_loop = false;
     LLVMValueRef last_loop_counter = NULL;
-    bool is_simple_func = true;
 #if WASM_ENABLE_DEBUG_AOT != 0
     LLVMMetadataRef location;
 #endif
+
+    uint32 loop_cnt = 0;
 
     // printf("compile func %d\n", func_index);
 
@@ -1126,7 +1197,7 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         comp_ctx->enable_counter_loop_checkpoint = false;
         comp_ctx->enable_checkpoint_pgo = false;
         comp_ctx->aot_frame = NULL;
-        // printf("skip func %d\n", func_index);
+        printf("skip func %d\n", func_index);
     }
 
     if (comp_ctx->enable_aux_stack_frame) {
@@ -1206,8 +1277,9 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             bh_assert(comp_ctx->aot_frame);
 
             uint64 ip_offset = (uint64)(uintptr_t)(frame_ip - func_ctx->aot_func->code);
-            bool skip_loop = pgo_skip_loop(comp_ctx->aot_file_name, func_index, ip_offset);
-            if (skip_loop && comp_ctx->enable_checkpoint_pgo) {
+            bool skip_loop = pgo_skip_loop(comp_ctx->aot_file_name, func_index, ip_offset) && comp_ctx->enable_checkpoint_pgo;
+            skip_loop |= skip_loop_ckpt(comp_ctx->aot_file_name, func_index, loop_cnt - 1);
+            if (skip_loop) {
                 fprintf(stderr, "skip loop %zu\n", ip_offset);
             } else {
                 if (comp_ctx->enable_counter_loop_checkpoint) {
@@ -1245,8 +1317,13 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
                     LLVMBuildCondBr(comp_ctx->builder, cond, ckpt_block, normal_block);
                     LLVMPositionBuilderAtEnd(comp_ctx->builder, ckpt_block);
 
-                    // TODO(huab): find a better way to commit locals
-                    aot_gen_commit_all_locals(comp_ctx->aot_frame);
+                    uint32 n_locals;
+                    uint32* locals;
+                    if (!get_modified_locals_in_loop(comp_ctx->aot_file_name, func_index, loop_cnt - 1, &n_locals, &locals)) {
+                        fprintf(stderr, "get_modified_locals_in_loop failed\n");
+                        exit(-1);
+                    }
+                    aot_gen_commit_locals(comp_ctx->aot_frame, n_locals, locals);
 
                     // checkpoint
                     comp_ctx->checkpoint_type = 1;
@@ -1286,8 +1363,8 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
             case WASM_OP_LOOP:
             {
                 if (opcode == WASM_OP_LOOP) {
-                    is_simple_func = false;
                     last_op_is_loop = true;
+                    loop_cnt++;
                 }
                 if (comp_ctx->enable_loop_checkpoint) {
                     if (comp_ctx->exp_disable_stack_commit_before_block) {
@@ -1469,7 +1546,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_CALL:
             {
-                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
 
                 read_leb_uint32(frame_ip, frame_ip_end, func_idx);
@@ -1492,7 +1568,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_CALL_INDIRECT:
             {
-                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
@@ -1524,7 +1599,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 #if WASM_ENABLE_TAIL_CALL != 0
             case WASM_OP_RETURN_CALL:
             {
-                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
 
                 if (!comp_ctx->enable_tail_call) {
@@ -1542,7 +1616,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
 
             case WASM_OP_RETURN_CALL_INDIRECT:
             {
-                is_simple_func = false;
                 uint8 *frame_ip_org = frame_ip;
                 uint32 tbl_idx;
 
@@ -3747,10 +3820,6 @@ aot_compile_func(AOTCompContext *comp_ctx, uint32 func_index)
         LLVMBasicBlockRef last_block = LLVMGetLastBasicBlock(func_ctx->func);
         if (last_block != func_ctx->got_exception_block)
             LLVMMoveBasicBlockAfter(func_ctx->got_exception_block, last_block);
-    }
-
-    if (is_simple_func) {
-        append_simple_func(comp_ctx->aot_file_name, func_index);
     }
 
     comp_ctx->enable_aux_stack_frame = enable_aux_stack_frame;
